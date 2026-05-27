@@ -1,0 +1,31 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "ferrum-gpu"
+version = "0.0.4"
+description = "Pure-Rust GPU compute substrate with Python bindings."
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Alejandro Soto Franco", email = "sotofranco.eng@gmail.com" }]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: GPU :: NVIDIA CUDA :: 13",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Rust",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering",
+]
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "ferrum_gpu._native"
+python-source = "python"

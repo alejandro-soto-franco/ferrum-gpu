@@ -1,0 +1,27 @@
+[package]
+name = "ferrum-gpu-py"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Python bindings for ferrum-gpu."
+
+[lib]
+name = "ferrum_gpu"
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow = "1"
+bytemuck = { workspace = true }
+cuda-core = { workspace = true }
+cuda-device = { workspace = true }
+cuda-host = { workspace = true }
+ferrum-gpu-fft = { workspace = true }
+num-complex = { workspace = true }
+numpy = { workspace = true }
+pyo3 = { workspace = true }
+
+[lints]
+workspace = true

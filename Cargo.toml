@@ -8,6 +8,7 @@ members = [
     "examples/vector-add",
     "examples/vector-add-cuda-oxide",
     "examples/fft-1d-c2c",
+    "crates/ferrum-gpu-py",
 ]
 
 [workspace.package]
@@ -35,6 +36,8 @@ serde_json = "1"
 thiserror = { version = "2", default-features = false, features = ["std"] }
 num-complex = { version = "0.4", default-features = false, features = ["std", "bytemuck"] }
 rustfft = "6"
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py310"] }
+numpy = "0.23"
 
 # cuda-oxide ecosystem (pinned to a specific main rev). Plan 2 integration.
 cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "6ed9938e73a1e036dfab13f6e9a4585a170d03cf" }
