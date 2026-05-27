@@ -23,9 +23,9 @@ This is `v0.1.0`. The workspace ships:
 - NVIDIA driver compatible with the installed Toolkit
 - Rust nightly `2026-04-03` (pinned via `rust-toolchain.toml`)
 - `cargo-oxide`: `cargo install --git https://github.com/NVlabs/cuda-oxide.git cargo-oxide`
-- Python 3.10+ with maturin + numpy + pytest (Plan 4 only)
+- For the Python bindings: Python 3.10+ with maturin + numpy + pytest
 
-## Quick start (Plan 1: hand-written PTX)
+## Quick start: vector-add via hand-written PTX
 
 ```bash
 git clone https://github.com/alejandro-soto-franco/ferrum-gpu
@@ -38,7 +38,7 @@ Expected:
 vector_add: 1048576 elements verified
 ```
 
-## cuda-oxide quick start (Plan 2: Rust-source vector_add)
+## Quick start: vector-add via Rust source + cuda-oxide
 
 ```bash
 cargo install --git https://github.com/NVlabs/cuda-oxide.git cargo-oxide
@@ -51,7 +51,7 @@ Expected:
 vector_add (cuda-oxide): 1048576 elements verified
 ```
 
-## FFT quick start (Plan 3: Stockham 1D C2C)
+## Quick start: 1D Stockham FFT
 
 ```bash
 make example-fft
@@ -59,12 +59,16 @@ make example-fft
 
 Runs 8 cases (N=4 through N=4096, batched, forward + inverse), each verified against a CPU Stockham reference within 1e-4 relative error.
 
-## Python quick start (Plan 4)
+## Quick start: Python
+
+[`uv`](https://github.com/astral-sh/uv) is the recommended Python package manager;
+the Makefile targets and the wheel install path work the same on `pip` for users
+who prefer it.
 
 ```bash
-python3 -m venv ~/.venvs/ferrum-gpu
+uv venv ~/.venvs/ferrum-gpu
 source ~/.venvs/ferrum-gpu/bin/activate
-pip install maturin pytest numpy
+uv pip install maturin pytest numpy
 make develop                       # builds the cdylib + installs into the venv
 python3 -c "
 import numpy as np, ferrum_gpu as fg
@@ -73,13 +77,22 @@ print(fg.fft.fft_1d_c2c_pow2(arr, log_n=2))
 "
 ```
 
+Pip equivalent:
+
+```bash
+python3 -m venv ~/.venvs/ferrum-gpu
+source ~/.venvs/ferrum-gpu/bin/activate
+pip install maturin pytest numpy
+make develop
+```
+
 Run the pytest matrix:
 
 ```bash
 make pytest
 ```
 
-8 cases, each compared against `numpy.fft.fft` within 1e-4 relative error. All pass on the user's RTX 5060 Laptop.
+29 cases (16 1D + 13 2D), each compared against `numpy.fft` within 1e-3 to 1e-4 relative error.
 
 ## Performance
 
