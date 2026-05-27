@@ -18,5 +18,9 @@ __pycache__/
 dist/
 build/
 
+# cargo-oxide intermediate artifacts (emitted at workspace root)
+*.ll
+*.ptx
+
 # Wolf (gitignored per project hygiene)
 .wolf/
