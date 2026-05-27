@@ -195,7 +195,12 @@ fn load_kernels(ctx: &Arc<CudaContext>) -> Result<kernels::LoadedModule> {
 
 /// Host-side runner. Input/output are flat f32 slices interleaved (re, im).
 /// `dir`: +1 forward, -1 inverse. `normalize`: divide inverse output by N.
-fn run_fft_flat(
+///
+/// Takes a borrowed `Arc<CudaContext>` + a borrowed `LoadedModule` so callers
+/// can reuse a persistent device across many calls.
+fn run_fft_flat_with_device(
+    ctx: &Arc<CudaContext>,
+    module: &kernels::LoadedModule,
     input_flat: &[f32],
     log_n: u32,
     batch: usize,
@@ -213,7 +218,6 @@ fn run_fft_flat(
     }
 
     let plan = Plan::new(log_n, batch, normalize);
-    let ctx: Arc<CudaContext> = CudaContext::new(0)?;
     let stream = ctx.default_stream();
 
     // For inverse: conjugate input on host (forward kernel + conjugate output
@@ -234,8 +238,6 @@ fn run_fft_flat(
     let dbuf_in = DeviceBuffer::from_host(&stream, &input_for_gpu)?;
     let dbuf_tw = DeviceBuffer::from_host(&stream, &twiddles_flat)?;
     let mut dbuf_out = DeviceBuffer::<f32>::zeroed(&stream, total * 2)?;
-
-    let module = load_kernels(&ctx)?;
 
     let block_threads = core::cmp::min(n / 2, 1024) as u32;
     let cfg = LaunchConfig {
@@ -269,6 +271,51 @@ fn run_fft_flat(
     Ok(host_out_flat)
 }
 
+/// One-shot variant: build a transient context + module, run, drop. Backward
+/// compatible path for callers that don't pass an explicit `device=`.
+fn run_fft_flat_oneshot(
+    input_flat: &[f32],
+    log_n: u32,
+    batch: usize,
+    dir: i32,
+    normalize: bool,
+) -> Result<Vec<f32>> {
+    let ctx: Arc<CudaContext> = CudaContext::new(0)?;
+    let module = load_kernels(&ctx)?;
+    run_fft_flat_with_device(&ctx, &module, input_flat, log_n, batch, dir, normalize)
+}
+
+/// Persistent CUDA device + loaded module. Construct once, reuse across
+/// many `fft_1d_c2c_pow2` calls. Avoids ~200 ms of context-creation +
+/// module-load overhead per call.
+#[pyclass(module = "ferrum_gpu._native")]
+pub struct Device {
+    inner: Arc<CudaContext>,
+    module: kernels::LoadedModule,
+}
+
+#[pymethods]
+impl Device {
+    #[new]
+    #[pyo3(signature = (ordinal = 0))]
+    fn new(ordinal: usize) -> PyResult<Self> {
+        let inner = CudaContext::new(ordinal).map_err(|e| {
+            PyValueError::new_err(format!("CudaContext::new({ordinal}): {e}"))
+        })?;
+        let module = load_kernels(&inner)
+            .map_err(|e| PyValueError::new_err(format!("load_kernels: {e}")))?;
+        Ok(Self { inner, module })
+    }
+
+    /// Synchronise the default stream.
+    fn sync(&self) -> PyResult<()> {
+        self.inner
+            .default_stream()
+            .synchronize()
+            .map_err(|e| PyValueError::new_err(format!("sync: {e}")))
+    }
+}
+
 /// Returns the crate version (smoke).
 #[pyfunction]
 fn version() -> &'static str {
@@ -288,18 +335,22 @@ fn version() -> &'static str {
 ///     "forward" (default) or "inverse".
 /// normalize : bool
 ///     Scale inverse output by 1/N when True.
+/// device : ferrum_gpu.cuda.Device, optional
+///     Persistent device handle. When supplied, the FFT reuses its
+///     CudaContext + loaded module instead of building transient ones.
 ///
 /// Returns
 /// -------
 /// numpy.ndarray of `complex64`, same length as input.
 #[pyfunction]
-#[pyo3(signature = (arr, log_n, direction = "forward", normalize = false))]
+#[pyo3(signature = (arr, log_n, direction = "forward", normalize = false, device = None))]
 fn fft_1d_c2c_pow2<'py>(
     py: Python<'py>,
     arr: PyReadonlyArray1<'py, num_complex::Complex32>,
     log_n: u32,
     direction: &str,
     normalize: bool,
+    device: Option<PyRef<'_, Device>>,
 ) -> PyResult<Bound<'py, PyArray1<num_complex::Complex32>>> {
     if !(2..=12).contains(&log_n) {
         return Err(PyValueError::new_err(format!(
@@ -331,8 +382,19 @@ fn fft_1d_c2c_pow2<'py>(
         input_flat.push(c.im);
     }
 
+    // Pull Send-able handles out of the (potentially borrowed) Device BEFORE
+    // entering allow_threads (PyRef<'_, Device> is !Send).
+    let device_handles: Option<(Arc<CudaContext>, kernels::LoadedModule)> = device
+        .as_ref()
+        .map(|d| (d.inner.clone(), d.module.clone()));
+
     let output_flat = py
-        .allow_threads(|| run_fft_flat(&input_flat, log_n, batch, dir_i, normalize))
+        .allow_threads(|| match device_handles {
+            Some((ctx, module)) => run_fft_flat_with_device(
+                &ctx, &module, &input_flat, log_n, batch, dir_i, normalize,
+            ),
+            None => run_fft_flat_oneshot(&input_flat, log_n, batch, dir_i, normalize),
+        })
         .map_err(|e| PyValueError::new_err(format!("ferrum-gpu fft error: {e}")))?;
 
     let mut out: Vec<num_complex::Complex32> = Vec::with_capacity(total);
@@ -346,6 +408,10 @@ fn fft_1d_c2c_pow2<'py>(
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(version, m)?)?;
+
+    let cuda = PyModule::new(m.py(), "cuda")?;
+    cuda.add_class::<Device>()?;
+    m.add_submodule(&cuda)?;
 
     let fft = PyModule::new(m.py(), "fft")?;
     fft.add_function(wrap_pyfunction!(fft_1d_c2c_pow2, &fft)?)?;
