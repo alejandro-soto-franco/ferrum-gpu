@@ -16,5 +16,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod dim;
+pub mod error;
 
 pub use dim::{Dim3, Direction};
+pub use error::{FerrumGpuError, Result};
