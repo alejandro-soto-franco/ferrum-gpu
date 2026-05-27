@@ -12,9 +12,10 @@
 
 pub mod complex;
 pub mod cpu;
+pub mod cpu_2d;
 pub mod plan;
 pub mod twiddles;
 
 pub use complex::Complex32;
-pub use plan::{Direction, Plan};
+pub use plan::{Direction, Plan, Plan2D};
 pub use twiddles::twiddles;
