@@ -1,0 +1,47 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/ferrum-gpu-core",
+    "crates/ferrum-gpu-cuda",
+    "crates/ferrum-gpu",
+    "examples/vector-add-nvrtc",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.85"
+authors = ["Alejandro Soto Franco <sotofranco.eng@gmail.com>"]
+license = "Apache-2.0"
+repository = "https://github.com/alejandro-soto-franco/ferrum-gpu"
+homepage = "https://github.com/alejandro-soto-franco/ferrum-gpu"
+documentation = "https://docs.rs/ferrum-gpu"
+
+[workspace.dependencies]
+ferrum-gpu-core = { version = "0.0.1", path = "crates/ferrum-gpu-core" }
+ferrum-gpu-cuda = { version = "0.0.1", path = "crates/ferrum-gpu-cuda" }
+ferrum-gpu = { version = "0.0.1", path = "crates/ferrum-gpu" }
+
+bytemuck = { version = "1", features = ["derive"] }
+cudarc = { version = "0.19", default-features = false, features = ["std", "driver", "nvrtc", "cuda-12000"] }
+log = "0.4"
+parking_lot = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = { version = "2", default-features = false, features = ["std"] }
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "warn"
+missing_safety_doc = "warn"
+ptr_as_ptr = "warn"
+ref_as_ptr = "warn"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4

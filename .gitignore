@@ -1,0 +1,22 @@
+# Cargo
+target
+Cargo.lock.bak
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Python (post-Plan 4)
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Wolf (gitignored per project hygiene)
+.wolf/
