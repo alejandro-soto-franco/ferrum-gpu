@@ -21,7 +21,7 @@ ferrum-gpu-cuda = { version = "0.0.1", path = "crates/ferrum-gpu-cuda" }
 ferrum-gpu = { version = "0.0.1", path = "crates/ferrum-gpu" }
 
 bytemuck = { version = "1", features = ["derive"] }
-cudarc = { version = "0.19", default-features = false, features = ["std", "driver", "nvrtc", "cuda-12000", "dynamic-loading"] }
+cudarc = { version = "0.19", default-features = false, features = ["std", "driver", "nvrtc", "cuda-13010", "dynamic-loading"] }
 log = "0.4"
 parking_lot = "0.12"
 serde = { version = "1", default-features = false, features = ["derive"] }

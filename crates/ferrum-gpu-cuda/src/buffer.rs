@@ -14,6 +14,13 @@ use cudarc::driver::{result, CudaContext, CudaStream};
 ///
 /// Drop frees the underlying device allocation synchronously via the stream
 /// the buffer was created on.
+///
+/// `#[repr(C)]` is load-bearing: the kernel-launch path in `backend_impl.rs`
+/// reads `ptr` at offset 0 of the struct via a type-erased view in order to
+/// pack `LaunchArg::Buffer` handles into the raw `cuLaunchKernel` arg vector.
+/// `PhantomData<T>` is zero-sized so the prefix layout (CUdeviceptr, usize,
+/// Arc<CudaStream>) is identical for every `T`.
+#[repr(C)]
 pub struct CudaBuffer<T: Pod> {
     /// Raw device pointer.
     pub(crate) ptr: cudarc::driver::sys::CUdeviceptr,
