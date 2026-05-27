@@ -1,0 +1,24 @@
+[package]
+name = "ferrum-gpu-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Core substrate types for ferrum-gpu: Backend trait, KernelArtifact, errors. no_std + alloc."
+
+[features]
+default = []
+std = []
+
+[dependencies]
+bytemuck = { workspace = true }
+serde = { workspace = true, features = ["alloc"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
