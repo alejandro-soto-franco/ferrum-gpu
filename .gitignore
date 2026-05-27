@@ -17,6 +17,9 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+# Maturin editable-install drops the compiled cdylib next to the python source
+*.abi3.so
+*.so
 
 # cargo-oxide intermediate artifacts (emitted at workspace root)
 *.ll
