@@ -30,6 +30,11 @@ serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = "1"
 thiserror = { version = "2", default-features = false, features = ["std"] }
 
+# cuda-oxide ecosystem (pinned to a specific main rev). Plan 2 integration.
+cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "6ed9938e73a1e036dfab13f6e9a4585a170d03cf" }
+cuda-core   = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "6ed9938e73a1e036dfab13f6e9a4585a170d03cf" }
+cuda-macros = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "6ed9938e73a1e036dfab13f6e9a4585a170d03cf" }
+
 [workspace.lints.rust]
 missing_docs = "warn"
 unsafe_op_in_unsafe_fn = "warn"
