@@ -1,19 +1,20 @@
 # ferrum-gpu
 
-Pure-Rust GPU compute substrate with Python bindings.
+Pure-Rust GPU compute substrate with Python bindings. FFT kernels run on NVIDIA GPUs today via [cuda-oxide](https://github.com/NVlabs/cuda-oxide) (Rust source compiled to PTX, no CUDA C). Cross-vendor support via spirv-oxide → Vulkan is the v0.2 roadmap.
 
-This is `v0.0.4` (Plans 1-4 of 5 toward `v0.1.0`). Today, the workspace ships:
+This is `v0.1.0`. The workspace ships:
 
 - `ferrum-gpu-core`: `Backend` trait, `KernelArtifact`, errors. `no_std + alloc`.
 - `ferrum-gpu-cuda`: `impl Backend for Cuda` over `cudarc` 0.19.
 - `ferrum-gpu`: facade with `Device<B>` and `Buffer<T, B>`.
-- `ferrum-gpu-fft`: 1D radix-2 power-of-2 C2C FFT host scaffolding + CPU Stockham reference.
-- `ferrum-gpu-py`: Python bindings (`ferrum_gpu.fft.fft_1d_c2c_pow2`) via PyO3 + maturin.
-- `examples/vector-add`: end-to-end demo using hand-written PTX dispatched through the substrate.
-- `examples/vector-add-cuda-oxide`: same kernel written in Rust, compiled to PTX by [cuda-oxide](https://github.com/NVlabs/cuda-oxide).
-- `examples/fft-1d-c2c`: 1D Stockham FFT kernel in Rust, verified GPU-vs-CPU across 8 cases (N from 4 to 4096, batched, forward + inverse).
+- `ferrum-gpu-fft`: 1D + 2D radix-2 power-of-2 C2C FFT host scaffolding + CPU Stockham reference.
+- `ferrum-gpu-py`: Python bindings via PyO3 + maturin. `ferrum_gpu.cuda.Device(0)` persistent handle + `ferrum_gpu.fft.fft_1d_c2c_pow2` + `ferrum_gpu.fft.fft_2d_c2c_pow2`.
+- `ferrum-gpu-bench`: cuFFT comparison binary (1D, batched).
+- `examples/vector-add`: end-to-end demo using hand-written PTX through the substrate.
+- `examples/vector-add-cuda-oxide`: same kernel in Rust, compiled to PTX by cuda-oxide.
+- `examples/fft-1d-c2c`: 1D Stockham FFT in Rust, GPU-vs-CPU on 8 cases (N from 4 to 4096, batched, forward + inverse).
 
-Plan 5 polishes for the public release: docs, wheel distribution, additional FFT shapes.
+29 GPU pytest cases verified end-to-end against `numpy.fft.fft` / `numpy.fft.fft2` (1D: 16 cases, 2D: 13 cases) within 1e-3 to 1e-4 relative error.
 
 ## Requirements
 

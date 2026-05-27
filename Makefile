@@ -61,7 +61,7 @@ pytest: develop
 	  VIRTUAL_ENV=$(VENV) PATH=$(VENV)/bin:$$PATH \
 	  $(VENV)/bin/pytest python/tests -v
 
-verify-all: check test-gpu example-vector-add example-vector-add-oxide example-fft pytest
+verify-all: check test-gpu example-vector-add example-vector-add-oxide example-fft pytest bench
 	@echo
 	@echo "=== ALL CHECKS PASSED ==="
 
