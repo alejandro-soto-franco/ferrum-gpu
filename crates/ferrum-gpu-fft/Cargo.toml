@@ -1,0 +1,19 @@
+[package]
+name = "ferrum-gpu-fft"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "FFT application built on the ferrum-gpu substrate."
+
+[dependencies]
+bytemuck = { workspace = true }
+num-complex = { workspace = true }
+
+[dev-dependencies]
+rustfft = { workspace = true }
+
+[lints]
+workspace = true

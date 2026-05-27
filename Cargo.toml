@@ -4,6 +4,7 @@ members = [
     "crates/ferrum-gpu-core",
     "crates/ferrum-gpu-cuda",
     "crates/ferrum-gpu",
+    "crates/ferrum-gpu-fft",
     "examples/vector-add",
     "examples/vector-add-cuda-oxide",
 ]
@@ -22,6 +23,7 @@ documentation = "https://docs.rs/ferrum-gpu"
 ferrum-gpu-core = { version = "0.0.1", path = "crates/ferrum-gpu-core" }
 ferrum-gpu-cuda = { version = "0.0.1", path = "crates/ferrum-gpu-cuda" }
 ferrum-gpu = { version = "0.0.1", path = "crates/ferrum-gpu" }
+ferrum-gpu-fft = { version = "0.0.1", path = "crates/ferrum-gpu-fft" }
 
 bytemuck = { version = "1", features = ["derive"] }
 cudarc = { version = "0.19", default-features = false, features = ["std", "driver", "nvrtc", "cuda-13010", "dynamic-loading"] }
@@ -30,6 +32,8 @@ parking_lot = "0.12"
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = "1"
 thiserror = { version = "2", default-features = false, features = ["std"] }
+num-complex = { version = "0.4", default-features = false, features = ["std", "bytemuck"] }
+rustfft = "6"
 
 # cuda-oxide ecosystem (pinned to a specific main rev). Plan 2 integration.
 cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "6ed9938e73a1e036dfab13f6e9a4585a170d03cf" }
