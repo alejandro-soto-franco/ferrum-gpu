@@ -1,0 +1,23 @@
+[package]
+name = "ferrum-gpu-cuda"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "CUDA backend for ferrum-gpu. impl Backend for Cuda over cudarc."
+
+[dependencies]
+bytemuck = { workspace = true }
+cudarc = { workspace = true }
+ferrum-gpu-core = { workspace = true }
+log = { workspace = true }
+parking_lot = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
