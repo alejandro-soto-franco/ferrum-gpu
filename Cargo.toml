@@ -4,6 +4,7 @@ members = [
     "crates/ferrum-gpu-core",
     "crates/ferrum-gpu-cuda",
     "crates/ferrum-gpu",
+    "examples/vector-add",
 ]
 
 [workspace.package]

@@ -1,0 +1,15 @@
+[package]
+name = "vector-add"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+anyhow = "1"
+bytemuck = { workspace = true }
+ferrum-gpu = { workspace = true, features = ["cuda"] }
+ferrum-gpu-core = { workspace = true }
+ferrum-gpu-cuda = { workspace = true }
+
+[lints]
+workspace = true
