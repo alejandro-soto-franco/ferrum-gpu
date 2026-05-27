@@ -3,18 +3,22 @@
 #
 # Build:   docker build -f crates/ferrum-gpu-py/Dockerfile.manylinux \
 #                       -t ferrum-gpu-builder:latest crates/ferrum-gpu-py
-# Run:     docker run --rm -v $(pwd):/work -w /work --gpus all \
+# Run:     docker run --rm -v $(pwd):/work -w /work \
 #                       ferrum-gpu-builder:latest \
 #                       /work/crates/ferrum-gpu-py/build-wheel.sh
 #
 # Notes:
 # - The image is ~6-8 GB. Build time ~15-25 minutes from scratch.
-# - `--gpus all` is required for `cargo oxide doctor` to validate libnvvm.
-#   The wheel build itself does not run a GPU kernel; it only produces
-#   PTX, so a GPU is not strictly required at build time, but cuda-oxide's
-#   bootstrap script verifies the toolchain via doctor.
-# - Output wheel lands in /work/dist/. Use `auditwheel show` to verify the
-#   manylinux_2_28_x86_64 tag.
+# - GPU at build time is NOT required. The build-wheel.sh script sets
+#   CUDA_OXIDE_TARGET=compute_70 so cuda-oxide emits virtual PTX that the
+#   runtime driver JITs to native SASS on whatever GPU the wheel-installer
+#   has. Add `--gpus all` only if you want to run `cargo oxide doctor`
+#   inside the container interactively.
+# - Output wheel lands in /work/dist/ tagged manylinux_2_28_x86_64. Verify
+#   with `auditwheel show dist/*.whl`.
+# - The wheel does NOT bundle libcudart; users must have an NVIDIA driver
+#   that supports CUDA 13.x (driver 580+). cudarc dynamic-loads libcuda
+#   at runtime.
 
 FROM quay.io/pypa/manylinux_2_28_x86_64:latest
 
