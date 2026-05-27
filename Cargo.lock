@@ -44,6 +44,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrum-gpu"
+version = "0.0.1"
+dependencies = [
+ "bytemuck",
+ "cudarc",
+ "ferrum-gpu-core",
+ "ferrum-gpu-cuda",
+ "parking_lot",
+ "thiserror",
+]
+
+[[package]]
 name = "ferrum-gpu-core"
 version = "0.0.1"
 dependencies = [

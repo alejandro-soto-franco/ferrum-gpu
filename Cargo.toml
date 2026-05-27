@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/ferrum-gpu-core",
     "crates/ferrum-gpu-cuda",
+    "crates/ferrum-gpu",
 ]
 
 [workspace.package]
