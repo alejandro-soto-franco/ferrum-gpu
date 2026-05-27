@@ -1,0 +1,16 @@
+[package]
+name = "fft-1d-c2c"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+anyhow = "1"
+bytemuck = { workspace = true }
+cuda-core = { workspace = true }
+cuda-device = { workspace = true }
+cuda-host = { workspace = true }
+ferrum-gpu-fft = { workspace = true }
+
+[lints]
+workspace = true

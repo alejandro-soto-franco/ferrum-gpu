@@ -227,6 +227,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fft-1d-c2c"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "cuda-core",
+ "cuda-device",
+ "cuda-host",
+ "ferrum-gpu-fft",
+]
+
+[[package]]
 name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
