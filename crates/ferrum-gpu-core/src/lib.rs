@@ -15,8 +15,12 @@ extern crate alloc;
 #[cfg(any(feature = "std", test))]
 extern crate std;
 
+pub mod artifact;
 pub mod dim;
 pub mod error;
 
+pub use artifact::{
+    ArgKind, BackendCaps, BackendId, KernelArtifact, KernelMeta, TargetInfo,
+};
 pub use dim::{Dim3, Direction};
 pub use error::{FerrumGpuError, Result};
