@@ -9,5 +9,6 @@ disk), so this wrapper pulls them via attribute access.
 from ferrum_gpu._native import fft as _fft_native
 
 fft_1d_c2c_pow2 = _fft_native.fft_1d_c2c_pow2
+fft_2d_c2c_pow2 = _fft_native.fft_2d_c2c_pow2
 
-__all__ = ["fft_1d_c2c_pow2"]
+__all__ = ["fft_1d_c2c_pow2", "fft_2d_c2c_pow2"]

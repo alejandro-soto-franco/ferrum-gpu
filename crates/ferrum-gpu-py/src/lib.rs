@@ -21,7 +21,10 @@ use cuda_host::cuda_module;
 
 use ferrum_gpu_fft::Plan;
 
-use numpy::{IntoPyArray, PyArray1, PyReadonlyArray1};
+use numpy::{
+    IntoPyArray, PyArray1, PyArray2, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2,
+    PyUntypedArrayMethods,
+};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -144,6 +147,61 @@ mod kernels {
                     *out_data.get_unchecked_mut(lane_off + i1 + 1) = PONG[i1 + 1];
                 }
                 t += block_dim;
+            }
+        }
+    }
+
+    /// Tiled square transpose of a complex matrix laid out as interleaved
+    /// f32 (re, im). Both `src` and `dst` are length `2*N*N` where
+    /// `N = 1 << log_n`.
+    ///
+    /// Tile size: 16x16 complex (32x16 f32). One thread per complex element,
+    /// using shared memory to coalesce both reads and writes. Row stride 17
+    /// (one f32-pair pad) eliminates shared-memory bank conflicts.
+    ///
+    /// Launch config: grid_dim = (N/TILE, N/TILE, 1), block_dim =
+    /// (TILE, TILE, 1).
+    #[kernel]
+    pub(crate) fn transpose_complex_pow2(
+        src: &[f32],
+        mut dst: DisjointSlice<f32>,
+        log_n: u32,
+    ) {
+        // 16 * 17 * 2 = 544 f32 = 2.1 KiB shared.
+        static mut TILE_BUF: SharedArray<f32, 544> = SharedArray::UNINIT;
+        const TILE: u32 = 16;
+
+        let n = 1u32 << log_n;
+        let bx = thread::blockIdx_x();
+        let by = thread::blockIdx_y();
+        let tx = thread::threadIdx_x();
+        let ty = thread::threadIdx_y();
+
+        // Source coords in the input matrix.
+        let src_i = by * TILE + ty;
+        let src_j = bx * TILE + tx;
+        if src_i < n && src_j < n {
+            let src_idx = 2 * ((src_i * n + src_j) as usize);
+            let sh_idx = 2 * ((ty * 17 + tx) as usize);
+            unsafe {
+                TILE_BUF[sh_idx] = src[src_idx];
+                TILE_BUF[sh_idx + 1] = src[src_idx + 1];
+            }
+        }
+        thread::sync_threads();
+
+        // Destination coords: dst[j][i] = src[i][j]. Block-level swap
+        // (bx,by) -> (by,bx); thread-level swap (tx,ty) inside the tile.
+        let dst_i = bx * TILE + ty;
+        let dst_j = by * TILE + tx;
+        if dst_i < n && dst_j < n {
+            let dst_idx = 2 * ((dst_i * n + dst_j) as usize);
+            let sh_idx = 2 * ((tx * 17 + ty) as usize);
+            unsafe {
+                let re = TILE_BUF[sh_idx];
+                let im = TILE_BUF[sh_idx + 1];
+                *dst.get_unchecked_mut(dst_idx) = re;
+                *dst.get_unchecked_mut(dst_idx + 1) = im;
             }
         }
     }
@@ -285,6 +343,117 @@ fn run_fft_flat_oneshot(
     run_fft_flat_with_device(&ctx, &module, input_flat, log_n, batch, dir, normalize)
 }
 
+/// 2D FFT runner: row-FFT, transpose, row-FFT, transpose-back. Four GPU
+/// launches, two ping-pong device buffers.
+///
+/// Input/output are flat f32 slices of length `2*N*N` (re, im interleaved,
+/// row-major). `dir`: +1 forward, -1 inverse. `normalize`: divide inverse
+/// output by N*N. Requires `log_n in [4, 12]` so that N is a multiple of
+/// the transpose tile size (16).
+fn run_fft_2d_flat(
+    ctx: &Arc<CudaContext>,
+    module: &kernels::LoadedModule,
+    input_flat: &[f32],
+    log_n: u32,
+    dir: i32,
+    normalize: bool,
+) -> Result<Vec<f32>> {
+    let n = 1usize << log_n;
+    if input_flat.len() != n * n * 2 {
+        return Err(anyhow!(
+            "2D input_flat len {} != {} (2*N*N)",
+            input_flat.len(),
+            n * n * 2
+        ));
+    }
+    let stream = ctx.default_stream();
+
+    // Inverse: conjugate input on host, reuse forward kernel.
+    let mut in_for_gpu: Vec<f32> = input_flat.to_vec();
+    if dir < 0 {
+        for chunk in in_for_gpu.chunks_exact_mut(2) {
+            chunk[1] = -chunk[1];
+        }
+    }
+
+    // Twiddles for a single row FFT (length N). Reused for both passes.
+    let plan_1d = Plan::new(log_n, n, false);
+    let mut twiddles_flat: Vec<f32> = Vec::with_capacity((n - 1) * 2);
+    for c in plan_1d.twiddles() {
+        twiddles_flat.push(c.re);
+        twiddles_flat.push(c.im);
+    }
+
+    let mut buf_a = DeviceBuffer::from_host(&stream, &in_for_gpu)?;
+    let mut buf_b = DeviceBuffer::<f32>::zeroed(&stream, n * n * 2)?;
+    let dbuf_tw = DeviceBuffer::from_host(&stream, &twiddles_flat)?;
+
+    let block_threads = core::cmp::min(n / 2, 1024) as u32;
+    let fft_cfg = LaunchConfig {
+        grid_dim: (n as u32, 1, 1),
+        block_dim: (block_threads, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    const TILE: u32 = 16;
+    let n_u32 = n as u32;
+    let trans_cfg = LaunchConfig {
+        grid_dim: (n_u32 / TILE, n_u32 / TILE, 1),
+        block_dim: (TILE, TILE, 1),
+        shared_mem_bytes: 0,
+    };
+
+    // Pass 1: row FFT into buf_b.
+    module.fft_radix2_c2c_pow2_1d(
+        stream.as_ref(),
+        fft_cfg,
+        &buf_a,
+        &dbuf_tw,
+        &mut buf_b,
+        log_n,
+    )?;
+    // Transpose buf_b -> buf_a.
+    module.transpose_complex_pow2(stream.as_ref(), trans_cfg, &buf_b, &mut buf_a, log_n)?;
+    // Pass 2: row FFT (column pass) buf_a -> buf_b.
+    module.fft_radix2_c2c_pow2_1d(
+        stream.as_ref(),
+        fft_cfg,
+        &buf_a,
+        &dbuf_tw,
+        &mut buf_b,
+        log_n,
+    )?;
+    // Transpose back buf_b -> buf_a.
+    module.transpose_complex_pow2(stream.as_ref(), trans_cfg, &buf_b, &mut buf_a, log_n)?;
+
+    let mut host_out_flat = buf_a.to_host_vec(&stream)?;
+
+    if dir < 0 {
+        for chunk in host_out_flat.chunks_exact_mut(2) {
+            chunk[1] = -chunk[1];
+        }
+        if normalize {
+            let inv = 1.0f32 / (n as f32 * n as f32);
+            for v in host_out_flat.iter_mut() {
+                *v *= inv;
+            }
+        }
+    }
+
+    Ok(host_out_flat)
+}
+
+/// One-shot 2D variant: transient context + module.
+fn run_fft_2d_flat_oneshot(
+    input_flat: &[f32],
+    log_n: u32,
+    dir: i32,
+    normalize: bool,
+) -> Result<Vec<f32>> {
+    let ctx: Arc<CudaContext> = CudaContext::new(0)?;
+    let module = load_kernels(&ctx)?;
+    run_fft_2d_flat(&ctx, &module, input_flat, log_n, dir, normalize)
+}
+
 /// Persistent CUDA device + loaded module. Construct once, reuse across
 /// many `fft_1d_c2c_pow2` calls. Avoids ~200 ms of context-creation +
 /// module-load overhead per call.
@@ -404,6 +573,91 @@ fn fft_1d_c2c_pow2<'py>(
     Ok(out.into_pyarray(py))
 }
 
+/// 2D FFT of a square `complex64` numpy array of shape `(N, N)`.
+///
+/// Arguments
+/// ---------
+/// arr : numpy.ndarray
+///     `complex64` 2D array of shape `(N, N)` where `N = 1 << log_n` and
+///     `log_n in [4, 12]`. The lower bound is set by the 16-wide transpose
+///     tile (N must be a multiple of 16).
+/// log_n : int
+///     log2(N).
+/// direction : str
+///     "forward" (default) or "inverse".
+/// normalize : bool
+///     Scale inverse output by 1/(N*N) when True.
+/// device : ferrum_gpu.cuda.Device, optional
+///     Persistent device handle. When supplied, the FFT reuses its
+///     CudaContext + loaded module instead of building transient ones.
+///
+/// Returns
+/// -------
+/// numpy.ndarray of `complex64`, shape `(N, N)`.
+#[pyfunction]
+#[pyo3(signature = (arr, log_n, direction = "forward", normalize = false, device = None))]
+fn fft_2d_c2c_pow2<'py>(
+    py: Python<'py>,
+    arr: PyReadonlyArray2<'py, num_complex::Complex32>,
+    log_n: u32,
+    direction: &str,
+    normalize: bool,
+    device: Option<PyRef<'_, Device>>,
+) -> PyResult<Bound<'py, PyArray2<num_complex::Complex32>>> {
+    if !(4..=12).contains(&log_n) {
+        return Err(PyValueError::new_err(format!(
+            "2D requires log_n in [4, 12]; got {log_n}"
+        )));
+    }
+    let n = 1usize << log_n;
+    let dims = arr.shape();
+    if dims.len() != 2 || dims[0] != n || dims[1] != n {
+        return Err(PyValueError::new_err(format!(
+            "arr shape {:?} != ({}, {})",
+            dims, n, n
+        )));
+    }
+    let dir_i = match direction {
+        "forward" => 1i32,
+        "inverse" => -1i32,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "direction must be 'forward' or 'inverse', got {other:?}"
+            )));
+        }
+    };
+
+    let arr_view = arr.as_slice()?;
+    let mut input_flat: Vec<f32> = Vec::with_capacity(n * n * 2);
+    for c in arr_view {
+        input_flat.push(c.re);
+        input_flat.push(c.im);
+    }
+
+    let device_handles: Option<(Arc<CudaContext>, kernels::LoadedModule)> = device
+        .as_ref()
+        .map(|d| (d.inner.clone(), d.module.clone()));
+
+    let output_flat = py
+        .allow_threads(|| match device_handles {
+            Some((ctx, module)) => {
+                run_fft_2d_flat(&ctx, &module, &input_flat, log_n, dir_i, normalize)
+            }
+            None => run_fft_2d_flat_oneshot(&input_flat, log_n, dir_i, normalize),
+        })
+        .map_err(|e| PyValueError::new_err(format!("ferrum-gpu fft 2d error: {e}")))?;
+
+    let mut out: Vec<num_complex::Complex32> = Vec::with_capacity(n * n);
+    for chunk in output_flat.chunks_exact(2) {
+        out.push(num_complex::Complex::new(chunk[0], chunk[1]));
+    }
+    let flat = out.into_pyarray(py);
+    let reshaped = flat
+        .reshape([n, n])
+        .map_err(|e| PyValueError::new_err(format!("reshape to (N,N): {e}")))?;
+    Ok(reshaped)
+}
+
 /// Native extension module entry point. Exposed under `ferrum_gpu._native`.
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -415,6 +669,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     let fft = PyModule::new(m.py(), "fft")?;
     fft.add_function(wrap_pyfunction!(fft_1d_c2c_pow2, &fft)?)?;
+    fft.add_function(wrap_pyfunction!(fft_2d_c2c_pow2, &fft)?)?;
     m.add_submodule(&fft)?;
     Ok(())
 }
