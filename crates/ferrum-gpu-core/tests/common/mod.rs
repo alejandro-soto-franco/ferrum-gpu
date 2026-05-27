@@ -1,4 +1,11 @@
 //! Shared test helpers across integration tests.
+//!
+//! Lives under `tests/common/` per cargo's integration-test sharing
+//! convention. Items are `pub` for cross-binary access; the
+//! `unreachable_pub` lint fires when a given binary does not import them
+//! all, which is normal for this pattern.
+
+#![allow(unreachable_pub, clippy::undocumented_unsafe_blocks)]
 
 use core::marker::PhantomData;
 use ferrum_gpu_core::{AnyBufferHandle, Backend, BackendId, Dim3, KernelArtifact, LaunchArgs};

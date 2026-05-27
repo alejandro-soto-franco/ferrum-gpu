@@ -103,7 +103,7 @@ fn main() -> anyhow::Result<()> {
         LaunchArg::<Cuda>::scalar(n_bytes),
     ];
     let pack = LaunchArgs::new(&args);
-    let grid = Dim3::new((n as u32 + 255) / 256, 1, 1);
+    let grid = Dim3::new((n as u32).div_ceil(256), 1, 1);
     let block = Dim3::new(256, 1, 1);
     Cuda::launch(dev.handle(), dev.default_stream(), &kernel, grid, block, 0, pack)?;
     dev.sync()?;

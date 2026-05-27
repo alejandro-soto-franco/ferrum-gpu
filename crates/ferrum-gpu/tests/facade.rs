@@ -1,3 +1,5 @@
+//! Integration test crate.
+
 use ferrum_gpu::{cuda, Device};
 
 fn gpu_available() -> bool {

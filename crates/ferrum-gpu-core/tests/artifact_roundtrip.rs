@@ -1,3 +1,5 @@
+//! Integration test crate.
+
 use ferrum_gpu_core::{
     ArgKind, BackendCaps, BackendId, KernelArtifact, KernelMeta, TargetInfo,
 };

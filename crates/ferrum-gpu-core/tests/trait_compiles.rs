@@ -1,3 +1,5 @@
+//! Integration test crate.
+
 mod common;
 use common::MockBackend;
 use ferrum_gpu_core::Backend;

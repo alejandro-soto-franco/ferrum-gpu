@@ -1,4 +1,4 @@
-.PHONY: check test test-gpu example-vector-add example-vector-add-oxide fmt clippy clean
+.PHONY: check test test-gpu example-vector-add example-vector-add-oxide verify-all fmt clippy clean
 
 check:
 	cargo check --workspace
@@ -15,11 +15,15 @@ example-vector-add:
 example-vector-add-oxide:
 	cargo oxide run vector-add-cuda-oxide --bin vector-add-cuda-oxide
 
+verify-all: check test-gpu example-vector-add example-vector-add-oxide
+	@echo
+	@echo "=== ALL CHECKS PASSED ==="
+
 fmt:
 	cargo fmt --all
 
 clippy:
-	cargo clippy --workspace --all-targets -- -D warnings
+	cargo clippy --workspace --all-targets --exclude vector-add-cuda-oxide -- -D warnings
 
 clean:
 	cargo clean

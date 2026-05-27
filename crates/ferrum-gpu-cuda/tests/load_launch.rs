@@ -118,7 +118,7 @@ fn load_and_launch_vector_add() {
         LaunchArg::<Cuda>::scalar(n_bytes),
     ];
     let pack = LaunchArgs::new(&args);
-    let grid = Dim3::new((n as u32 + 255) / 256, 1, 1);
+    let grid = Dim3::new((n as u32).div_ceil(256), 1, 1);
     let block = Dim3::new(256, 1, 1);
     Cuda::launch(&ctx, &stream, &kernel, grid, block, 0, pack).expect("launch");
     Cuda::sync_stream(&ctx, &stream).unwrap();

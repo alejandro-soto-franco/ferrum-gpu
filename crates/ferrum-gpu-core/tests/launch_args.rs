@@ -1,3 +1,5 @@
+//! Integration test crate.
+
 use ferrum_gpu_core::{LaunchArg, LaunchArgs};
 
 // Use the MockBackend from Task 6's test by re-declaring it here. (Rust

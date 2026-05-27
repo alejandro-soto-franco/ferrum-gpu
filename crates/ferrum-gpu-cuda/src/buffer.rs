@@ -37,6 +37,9 @@ pub struct CudaBuffer<T: Pod> {
 // host without an explicit copy call, so sharing or sending the handle across
 // threads is safe regardless of whether `T` itself is `Send`/`Sync`.
 unsafe impl<T: Pod> Send for CudaBuffer<T> {}
+// SAFETY: same reasoning as the preceding Send impl. Sharing &CudaBuffer<T>
+// across threads only exposes the device pointer (an integer) and length,
+// neither of which is a `T`-typed host-side value.
 unsafe impl<T: Pod> Sync for CudaBuffer<T> {}
 
 impl<T: Pod> Drop for CudaBuffer<T> {

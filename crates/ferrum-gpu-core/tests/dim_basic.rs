@@ -1,3 +1,5 @@
+//! Integration test crate.
+
 use ferrum_gpu_core::{Dim3, Direction};
 
 #[test]
