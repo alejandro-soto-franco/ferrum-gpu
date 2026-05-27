@@ -8,8 +8,11 @@
 #![warn(unsafe_op_in_unsafe_fn)]
 #![warn(unreachable_pub)]
 
+pub mod backend_impl;
+pub mod buffer;
 pub mod error;
 
+pub use buffer::CudaBuffer;
 pub use error::CudaBackendError;
 
 /// Zero-sized marker selecting the CUDA backend.
