@@ -1,0 +1,17 @@
+[package]
+name = "ferrum-gpu-bench"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+anyhow = "1"
+bytemuck = { workspace = true }
+cuda-core = { workspace = true }
+cuda-device = { workspace = true }
+cuda-host = { workspace = true }
+cudarc = { version = "0.19", default-features = false, features = ["std", "driver", "cufft", "cuda-13010", "dynamic-loading"] }
+ferrum-gpu-fft = { workspace = true }
+
+[lints]
+workspace = true

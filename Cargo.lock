@@ -195,6 +195,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrum-gpu-bench"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "cuda-core",
+ "cuda-device",
+ "cuda-host",
+ "cudarc",
+ "ferrum-gpu-fft",
+]
+
+[[package]]
 name = "ferrum-gpu-core"
 version = "0.0.1"
 dependencies = [

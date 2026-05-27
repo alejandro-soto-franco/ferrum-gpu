@@ -1,4 +1,4 @@
-.PHONY: check test test-gpu example-vector-add example-vector-add-oxide example-fft develop wheel pytest verify-all fmt clippy clean
+.PHONY: check test test-gpu example-vector-add example-vector-add-oxide example-fft bench develop wheel pytest verify-all fmt clippy clean
 
 # cuda-oxide-codegen-backend RUSTFLAGS used by maturin when building the
 # Python cdylib. Mirrors what cargo-oxide sets internally for `cargo oxide run/build`.
@@ -24,6 +24,9 @@ example-vector-add-oxide:
 
 example-fft:
 	cargo oxide run fft-1d-c2c --bin fft-1d-c2c
+
+bench:
+	cargo oxide run ferrum-gpu-bench --bin ferrum-gpu-bench
 
 develop:
 	# Wipe stale release artifacts so cargo always rebuilds ferrum-gpu-py
