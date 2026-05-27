@@ -1,0 +1,86 @@
+# PyPI publish workflow.
+#
+# This is the workflow filename you should configure under your PyPI
+# Trusted Publisher settings (project name: ferrum-gpu, workflow filename:
+# release.yml).
+#
+# Flow: build the manylinux_2_28 wheel locally with `make wheel-manylinux`,
+# upload it to a GitHub Release as an asset, then trigger this workflow
+# (manually via `gh workflow run release.yml` or via the Releases UI).
+# The workflow downloads the wheel from the Release and publishes to PyPI
+# using OIDC trusted publishing (no PyPI token in repo secrets).
+#
+# Why not build the wheel inside CI: the cuda-oxide toolchain Docker image
+# is ~6-8 GB and takes ~15-25 minutes to build from scratch. That doesn't
+# fit comfortably in a free GHA runner and burns minutes. Local Docker
+# build + upload-and-publish is faster and uses ~30 seconds of GHA per
+# release.
+
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Git tag whose Release assets to publish (e.g. v0.1.0)"
+        required: true
+        type: string
+      target_index:
+        description: "Index to publish to"
+        required: true
+        default: testpypi
+        type: choice
+        options:
+          - testpypi
+          - pypi
+
+  # Optional: also fire when a Release is published. Comment out if you
+  # want strictly manual control.
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write   # required by PyPI trusted publishing (OIDC)
+
+jobs:
+  publish:
+    name: Publish to ${{ inputs.target_index || 'pypi' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.target_index || 'pypi' }}
+    steps:
+      - name: Determine release tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.release_tag }}" ]; then
+            echo "tag=${{ inputs.release_tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download wheel assets from the Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist
+          gh release download "${{ steps.tag.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "ferrum_gpu-*.whl" \
+            --dir dist
+          ls -la dist/
+
+      - name: Publish to TestPyPI
+        if: ${{ inputs.target_index == 'testpypi' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist/
+          skip-existing: true
+
+      - name: Publish to PyPI
+        if: ${{ inputs.target_index == 'pypi' || (github.event_name == 'release' && github.event.action == 'published') }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          skip-existing: true
