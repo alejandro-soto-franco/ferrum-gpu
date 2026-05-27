@@ -104,6 +104,31 @@ CPU-only tests: `make test`.
 
 GPU tests + all examples + pytest (requires CUDA + NVIDIA GPU): `make verify-all`.
 
+## Publishing (PyPI wheel)
+
+The public wheel is built inside a `manylinux_2_28_x86_64` Docker image
+that ships CUDA Toolkit 13.x, the cuda-oxide-pinned Rust nightly, and
+maturin. The container is ~6-8 GB and takes ~15-25 minutes to build the
+first time.
+
+```bash
+make wheel-manylinux        # builds dist/ferrum_gpu-*-manylinux_2_28_x86_64.whl
+auditwheel show dist/*.whl  # verify the manylinux tag
+```
+
+Publishing to PyPI is operator-driven (no CI):
+
+```bash
+# TestPyPI first
+twine upload --repository testpypi dist/*.whl
+
+# PyPI (requires a token in ~/.pypirc)
+twine upload dist/*.whl
+```
+
+The local-build path (`make develop` + `make wheel`) produces a wheel
+tagged `linux_x86_64` (not manylinux). Useful for local testing only.
+
 ## License
 
 Apache-2.0.

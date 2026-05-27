@@ -1,0 +1,58 @@
+# manylinux_2_28_x86_64 base + CUDA Toolkit 13.x + Rust nightly-2026-04-03 +
+# cargo-oxide + maturin. Used to build the public PyPI wheel.
+#
+# Build:   docker build -f crates/ferrum-gpu-py/Dockerfile.manylinux \
+#                       -t ferrum-gpu-builder:latest crates/ferrum-gpu-py
+# Run:     docker run --rm -v $(pwd):/work -w /work --gpus all \
+#                       ferrum-gpu-builder:latest \
+#                       /work/crates/ferrum-gpu-py/build-wheel.sh
+#
+# Notes:
+# - The image is ~6-8 GB. Build time ~15-25 minutes from scratch.
+# - `--gpus all` is required for `cargo oxide doctor` to validate libnvvm.
+#   The wheel build itself does not run a GPU kernel; it only produces
+#   PTX, so a GPU is not strictly required at build time, but cuda-oxide's
+#   bootstrap script verifies the toolchain via doctor.
+# - Output wheel lands in /work/dist/. Use `auditwheel show` to verify the
+#   manylinux_2_28_x86_64 tag.
+
+FROM quay.io/pypa/manylinux_2_28_x86_64:latest
+
+# Pin rustc nightly: the same version cuda-oxide pins.
+ENV RUSTUP_HOME=/root/.rustup CARGO_HOME=/root/.cargo
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install CUDA Toolkit 13.x via NVIDIA's cuda-keyring rpm.
+RUN dnf -y install dnf-plugins-core && \
+    dnf config-manager --add-repo \
+      https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo && \
+    dnf -y install cuda-toolkit-13-1 && \
+    dnf clean all
+
+ENV PATH="/usr/local/cuda/bin:${PATH}" \
+    LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}" \
+    CUDA_HOME=/usr/local/cuda
+
+# Install Rust nightly-2026-04-03 + components.
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+      sh -s -- -y --default-toolchain nightly-2026-04-03 \
+        --component rust-src --component rustc-dev --component llvm-tools \
+        --component clippy
+
+# Install cargo-oxide. The build respects rust-toolchain.toml inside the
+# cloned repo (nightly-2026-04-03).
+RUN cargo install --git https://github.com/NVlabs/cuda-oxide.git cargo-oxide
+
+# Bootstrap the codegen backend (caches at ~/.cargo/cuda-oxide/).
+# Skip cuda-gdb check; it's optional.
+RUN cargo oxide setup || cargo oxide doctor || true
+
+# Install maturin + patchelf.
+RUN /opt/python/cp310-cp310/bin/pip install --no-cache-dir maturin patchelf
+
+ENV MATURIN=/opt/python/cp310-cp310/bin/maturin
+
+# Default to a shell; the user invokes maturin via the build-wheel.sh
+# script or directly.
+WORKDIR /work
+CMD ["bash"]

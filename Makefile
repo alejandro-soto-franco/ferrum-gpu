@@ -49,6 +49,13 @@ wheel:
 	  RUSTFLAGS='$(FERRUM_GPU_RUSTFLAGS)' \
 	  $(VENV)/bin/maturin build --release
 
+wheel-manylinux:
+	docker build -f crates/ferrum-gpu-py/Dockerfile.manylinux \
+	    -t ferrum-gpu-builder:latest crates/ferrum-gpu-py
+	docker run --rm -v $(PWD):/work -w /work --gpus all \
+	    ferrum-gpu-builder:latest \
+	    /work/crates/ferrum-gpu-py/build-wheel.sh
+
 pytest: develop
 	cd crates/ferrum-gpu-py && \
 	  VIRTUAL_ENV=$(VENV) PATH=$(VENV)/bin:$$PATH \
