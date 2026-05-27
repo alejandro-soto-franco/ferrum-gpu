@@ -1,6 +1,7 @@
 //! Rust kernels for ferrum-gpu, compiled to PTX by cuda-oxide.
-
-#![no_std]
+//!
+//! Not `no_std`: the `#[cuda_module]` macro generates host-side launch
+//! glue that references `std` and `cuda_host`.
 
 use cuda_device::{cuda_module, kernel, thread, DisjointSlice};
 
