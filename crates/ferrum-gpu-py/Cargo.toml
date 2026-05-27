@@ -19,6 +19,7 @@ cuda-core = { workspace = true }
 cuda-device = { workspace = true }
 cuda-host = { workspace = true }
 ferrum-gpu-fft = { workspace = true }
+libc = "0.2"
 num-complex = { workspace = true }
 numpy = { workspace = true }
 pyo3 = { workspace = true }

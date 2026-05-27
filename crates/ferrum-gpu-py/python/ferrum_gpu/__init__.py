@@ -1,9 +1,6 @@
-"""ferrum-gpu Python bindings.
-
-Re-exports the native extension module for ergonomic access. The `fft`
-submodule lands in P4T3.
-"""
+"""ferrum-gpu Python bindings."""
 
 from ferrum_gpu._native import version
+from ferrum_gpu import fft
 
-__all__ = ["version"]
+__all__ = ["version", "fft"]
