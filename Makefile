@@ -44,10 +44,19 @@ develop:
 	  $(VENV)/bin/maturin develop --release
 
 wheel:
+	# Same stale-artifact wipe as `develop`: cargo's fingerprint cache
+	# doesn't track RUSTFLAGS the way it should for the cuda-oxide
+	# codegen-backend, leaving a 0-byte .so in target/release/ that
+	# breaks maturin's manylinux compliance check.
+	rm -rf /home/cargo-targets/ferrum-gpu/release/.fingerprint/ferrum-gpu-py-* \
+	       /home/cargo-targets/ferrum-gpu/release/libferrum_gpu.so \
+	       /home/cargo-targets/ferrum-gpu/release/libferrum_gpu.d \
+	       /home/cargo-targets/ferrum-gpu/release/deps/libferrum_gpu-*.so \
+	       /home/cargo-targets/ferrum-gpu/maturin
 	cd crates/ferrum-gpu-py && \
 	  VIRTUAL_ENV=$(VENV) PATH=$(VENV)/bin:$$PATH \
 	  RUSTFLAGS='$(FERRUM_GPU_RUSTFLAGS)' \
-	  $(VENV)/bin/maturin build --release
+	  $(VENV)/bin/maturin build --release --auditwheel skip
 
 wheel-manylinux:
 	docker build -f crates/ferrum-gpu-py/Dockerfile.manylinux \
