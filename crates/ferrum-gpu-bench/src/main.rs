@@ -153,11 +153,25 @@ const BATCH: usize = 256;
 const WARMUP: usize = 10;
 const TRIALS: usize = 100;
 
+/// Per-launch timing report (seconds), averaged over TRIALS.
+#[derive(Debug, Clone, Copy)]
+pub struct BenchSample {
+    /// Median per-launch GPU time (CUDA events bracketing each kernel).
+    pub event_med_s: f64,
+    /// Mean per-launch wall-clock time (Instant around the TRIALS loop / TRIALS).
+    pub wall_mean_s: f64,
+}
+
+fn median(mut xs: Vec<f64>) -> f64 {
+    xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    xs[xs.len() / 2]
+}
+
 fn bench_ferrum(
     ctx: &Arc<CudaContext>,
     module: &kernels::LoadedModule,
     log_n: u32,
-) -> Result<f64> {
+) -> Result<BenchSample> {
     let n = 1usize << log_n;
     let total = n * BATCH;
     let plan = Plan::new(log_n, BATCH, false);
@@ -181,40 +195,47 @@ fn bench_ferrum(
         shared_mem_bytes: 0,
     };
 
-    for _ in 0..WARMUP {
+    let launch = |dbuf_in: &DeviceBuffer<f32>,
+                  dbuf_tw: &DeviceBuffer<f32>,
+                  dbuf_out: &mut DeviceBuffer<f32>|
+     -> Result<()> {
         module.fft_radix2_c2c_pow2_1d_fallback(
             stream.as_ref(),
             cfg,
-            &dbuf_in,
-            &dbuf_tw,
-            &mut dbuf_out,
+            dbuf_in,
+            dbuf_tw,
+            dbuf_out,
             log_n,
         )?;
-    }
+        Ok(())
+    };
+
+    for _ in 0..WARMUP { launch(&dbuf_in, &dbuf_tw, &mut dbuf_out)?; }
     stream.synchronize()?;
 
+    let mut event_samples_s: Vec<f64> = Vec::with_capacity(TRIALS);
+    let timing_flag = Some(cuda_core::sys::CUevent_flags_enum_CU_EVENT_DEFAULT);
     let t0 = Instant::now();
     for _ in 0..TRIALS {
-        module.fft_radix2_c2c_pow2_1d_fallback(
-            stream.as_ref(),
-            cfg,
-            &dbuf_in,
-            &dbuf_tw,
-            &mut dbuf_out,
-            log_n,
-        )?;
+        let start_ev = ctx.new_event(timing_flag)?;
+        let stop_ev = ctx.new_event(timing_flag)?;
+        start_ev.record(&stream)?;
+        launch(&dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+        stop_ev.record(&stream)?;
+        stop_ev.synchronize()?;
+        let ms = start_ev.elapsed_ms(&stop_ev)?;
+        event_samples_s.push(ms as f64 * 1.0e-3);
     }
     stream.synchronize()?;
-    let dt = t0.elapsed().as_secs_f64();
-    Ok(dt / (TRIALS as f64))
+    let wall_mean_s = t0.elapsed().as_secs_f64() / TRIALS as f64;
+    Ok(BenchSample { event_med_s: median(event_samples_s), wall_mean_s })
 }
 
-fn bench_cufft(cudarc_ctx: &Arc<CudarcContext>, log_n: u32) -> Result<f64> {
+fn bench_cufft(cudarc_ctx: &Arc<CudarcContext>, log_n: u32) -> Result<BenchSample> {
     let n = 1usize << log_n;
     let total = n * BATCH;
     let stream = cudarc_ctx.default_stream();
 
-    // Build the input as interleaved float2 = (re, im).
     let input_data: Vec<cufft_sys::float2> = (0..total)
         .map(|i| {
             let re = ((2 * i) as f32 * 0.001).sin();
@@ -244,14 +265,27 @@ fn bench_cufft(cudarc_ctx: &Arc<CudarcContext>, log_n: u32) -> Result<f64> {
     }
     stream.synchronize().map_err(|e| anyhow!("sync: {e}"))?;
 
+    let timing_flag = Some(cudarc::driver::sys::CUevent_flags::CU_EVENT_DEFAULT);
+    let mut event_samples_s: Vec<f64> = Vec::with_capacity(TRIALS);
     let t0 = Instant::now();
     for _ in 0..TRIALS {
+        let start_ev = cudarc_ctx
+            .new_event(timing_flag)
+            .map_err(|e| anyhow!("new_event: {e}"))?;
+        let stop_ev = cudarc_ctx
+            .new_event(timing_flag)
+            .map_err(|e| anyhow!("new_event: {e}"))?;
+        start_ev.record(&stream).map_err(|e| anyhow!("record start: {e}"))?;
         plan.exec_c2c(&mut d_in, &mut d_out, FftDirection::Forward)
             .map_err(|e| anyhow!("cufft exec: {e:?}"))?;
+        stop_ev.record(&stream).map_err(|e| anyhow!("record stop: {e}"))?;
+        stop_ev.synchronize().map_err(|e| anyhow!("event sync: {e}"))?;
+        let ms = start_ev.elapsed_ms(&stop_ev).map_err(|e| anyhow!("elapsed: {e}"))?;
+        event_samples_s.push(ms as f64 * 1.0e-3);
     }
     stream.synchronize().map_err(|e| anyhow!("sync: {e}"))?;
-    let dt = t0.elapsed().as_secs_f64();
-    Ok(dt / (TRIALS as f64))
+    let wall_mean_s = t0.elapsed().as_secs_f64() / TRIALS as f64;
+    Ok(BenchSample { event_med_s: median(event_samples_s), wall_mean_s })
 }
 
 fn main() -> Result<()> {
@@ -264,29 +298,48 @@ fn main() -> Result<()> {
     // buffers so the two contexts don't have to share allocations.
     let cudarc_ctx = CudarcContext::new(0).map_err(|e| anyhow!("cudarc CudaContext::new: {e}"))?;
 
+    let gate_mode = std::env::args().any(|a| a == "--gate");
+    let gate_ratio = 0.9_f64;
+    let mut misses: Vec<(usize, f64)> = Vec::new();
+
     println!(
         "ferrum-gpu-bench: 1D radix-2 C2C FFT, batch={}, warmup={}, trials={}",
         BATCH, WARMUP, TRIALS
     );
     println!(
-        "{:<8} {:<14} {:<14} {:<10}",
-        "N", "ferrum_us", "cufft_us", "ratio"
+        "{:<8} {:<11} {:<11} {:<11} {:<11} {:<9}",
+        "N", "fe_ev_us", "cu_ev_us", "fe_wl_us", "cu_wl_us", "sp_event"
     );
     for &log_n in LOG_NS {
         let n = 1usize << log_n;
-        let ferrum_s = bench_ferrum(&ctx, &module, log_n)?;
-        let cufft_s = bench_cufft(&cudarc_ctx, log_n)?;
-        let ferrum_us = ferrum_s * 1.0e6 / (BATCH as f64);
-        let cufft_us = cufft_s * 1.0e6 / (BATCH as f64);
-        let ratio = if cufft_us > 0.0 {
-            ferrum_us / cufft_us
-        } else {
-            f64::NAN
-        };
+        let ferr = bench_ferrum(&ctx, &module, log_n)?;
+        let cu = bench_cufft(&cudarc_ctx, log_n)?;
+        let fe_ev_us = ferr.event_med_s * 1.0e6 / (BATCH as f64);
+        let cu_ev_us = cu.event_med_s * 1.0e6 / (BATCH as f64);
+        let fe_wl_us = ferr.wall_mean_s * 1.0e6 / (BATCH as f64);
+        let cu_wl_us = cu.wall_mean_s * 1.0e6 / (BATCH as f64);
+        let sp_event = if fe_ev_us > 0.0 { cu_ev_us / fe_ev_us } else { f64::NAN };
         println!(
-            "{:<8} {:<14.3} {:<14.3} {:<10.2}",
-            n, ferrum_us, cufft_us, ratio
+            "{:<8} {:<11.3} {:<11.3} {:<11.3} {:<11.3} {:<9.2}",
+            n, fe_ev_us, cu_ev_us, fe_wl_us, cu_wl_us, sp_event
         );
+        if gate_mode {
+            let event_ratio = fe_ev_us / cu_ev_us;
+            if event_ratio > gate_ratio {
+                misses.push((n, event_ratio));
+            }
+        }
+    }
+    if gate_mode {
+        if misses.is_empty() {
+            println!("\nperf-gate: PASS (ferrum_event_us <= {} * cufft_event_us on all sizes)", gate_ratio);
+        } else {
+            eprintln!("\nperf-gate: MISS on:");
+            for (n, r) in &misses {
+                eprintln!("  N = {n}: ratio = {:.3} (need <= {})", r, gate_ratio);
+            }
+            std::process::exit(1);
+        }
     }
     Ok(())
 }
