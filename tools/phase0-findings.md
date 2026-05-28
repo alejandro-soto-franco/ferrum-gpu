@@ -62,6 +62,21 @@ Ratio: 1.09x
 
 Conclusion: Ratio < 1.2x indicates minimal bank-conflict overhead. Drop +1 padding from fft_c2c_4096 design to save shared-mem space and simplify indexing.
 
+## Phase 1 deviation: ferrum-gpu-py switch deferred
+
+Plan Task 1.5 switches `ferrum-gpu-py` to consume the kernels crate. Deferred to
+Phase 5/6 because the cdylib loads PTX from its own `.so` via `dladdr` +
+`artifact_bundles_from_binary_path` filtered by `CARGO_PKG_NAME`. Switching to
+the kernels crate requires loading a second bundle (the kernels crate's PTX
+also linked into the `.so`) and routing calls across two `LoadedModule`s, since
+`transpose_complex_pow2` stays in the py crate for now (only consumer).
+
+Bench + example consumers DID switch (Phase 1 Tasks 1.3 + 1.4). Dedup payoff
+preserved on the perf-critical path. Python wheel keeps the v0.1 inlined
+`fft_radix2_c2c_pow2_1d` + `transpose_complex_pow2` until Phase 5 (when the
+specialised kernels need a Python-facing dispatch and we sort out the
+multi-module loader).
+
 ## Phase 0 summary
 
 Design adjustments for Phase 3+:
