@@ -240,6 +240,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrum-gpu-fft-kernels"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cuda-core",
+ "cuda-device",
+ "cuda-host",
+ "ferrum-gpu-fft",
+]
+
+[[package]]
 name = "ferrum-gpu-py"
 version = "0.1.0"
 dependencies = [
