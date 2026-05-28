@@ -96,12 +96,15 @@ phase0:
 	@echo
 	@echo "Note: Task 0.1 step 5 requires: ncu --set full --csv target/release/cufft-ncu-trace"
 
-.PHONY: gpu-lock bench-locked
+.PHONY: gpu-lock bench-locked perf-gate
 gpu-lock:
 	./tools/bench-gpu-lock.sh
 
 bench-locked:
 	./tools/bench-gpu-lock.sh make bench
+
+perf-gate:
+	./tools/bench-gpu-lock.sh sh -c 'cd crates/ferrum-gpu-bench && cargo oxide run --bin perf-gate'
 
 clean:
 	cargo clean

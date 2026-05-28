@@ -13,6 +13,18 @@ cuda-host = { workspace = true }
 cudarc = { version = "0.19", default-features = false, features = ["std", "driver", "cufft", "nvrtc", "cuda-13010", "dynamic-loading"] }
 ferrum-gpu-fft = { workspace = true }
 
+[lib]
+name = "ferrum_gpu_bench"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ferrum-gpu-bench"
+path = "src/main.rs"
+
+[[bin]]
+name = "perf-gate"
+path = "src/bin/perf-gate.rs"
+
 [[bin]]
 name = "cufft-ncu-trace"
 path = "src/bin/cufft-ncu-trace.rs"
