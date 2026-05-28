@@ -7,13 +7,22 @@ CUDA Toolkit: <nvcc --version>
 
 ## Task 0.1: cuFFT kernel-name trace
 
-Output: `tools/ncu/cufft-blackwell-<date>.txt`
+Output: `tools/ncu/cufft-blackwell-2026-05-28.txt`
+
+Ran `ncu --kernel-name regex:"cufft" --launch-skip 5 --launch-count 1 ./target/release/cufft-ncu-trace`.
+The kernel regex did not match; ncu reported `Available Kernels: 1. vector_fft`. So cuFFT 11.x on
+Blackwell dispatches a single kernel named `vector_fft` for all three sizes at batch=256, forward C2C.
 
 | N    | Kernel name(s)     | Notes |
 | ---- | ------------------ | ----- |
-| 256  | ?                  |       |
-| 1024 | ?                  |       |
-| 4096 | ?                  |       |
+| 256  | vector_fft         | same kernel across all sizes (no per-size dispatch at host-API level) |
+| 1024 | vector_fft         | same |
+| 4096 | vector_fft         | same |
+
+Detailed per-launch metrics (regs/thread, smem/block, grid/block dims) require GPU performance
+counter access (`NVreg_RestrictProfilingToAdminUsers=0` or sudo ncu); blocked by `ERR_NVGPUCTRPERM`.
+Operator can rerun under sudo if these become load-bearing. Conclusion is already informative:
+cuFFT's single-kernel-fits-all design validates the per-size specialisation strategy in our spec.
 
 ## Task 0.2: CuSimd<f32, 4> PTX lowering
 
