@@ -120,21 +120,24 @@ make pytest
 
 ## Performance
 
-`make bench` runs `ferrum-gpu-bench`, which times the in-tree
-cuda-oxide-compiled Stockham radix-2 power-of-2 C2C kernel against cuFFT
-(via cudarc 0.19's `cufft` feature) for batched 1D transforms at
-N in {256, 1024, 4096}, batch = 256, 100 trials per size + 10-trial
-warmup. Per-batch microseconds, measured on an RTX 5060 Laptop (sm_120):
+`make perf-gate` runs the in-tree specialised kernels against cuFFT 12.x
+for batched 1D forward C2C FFTs at N in {256, 1024, 4096}, batch = 256,
+with the GPU graphics clock locked via `tools/bench-gpu-lock.sh`. The
+gate passes if `ferrum_event_us` is at most `0.9 * cufft_event_us` on
+every size. Numbers below are medians over 100 trials with 10-trial
+warmup, alternating ferrum and cuFFT launches per trial.
 
-| N    | ferrum_us | cufft_us | ratio |
-| ---- | --------- | -------- | ----- |
-| 256  | 0.089     | 0.016    | 5.52  |
-| 1024 | 0.162     | 0.059    | 2.72  |
-| 4096 | 0.548     | 0.080    | 6.86  |
+Hardware: RTX 5060 Laptop (sm_120, Blackwell). Driver: TBD. CUDA Toolkit: TBD. Date: TBD.
 
-The Stockham kernel is a single-block-per-FFT reference implementation
-with no radix-4 or warp-specialised stages, so cuFFT's vendor-tuned plan
-wins outright at these sizes. Closing the gap is on the v0.2 roadmap.
+| N    | ferrum_event_us | cufft_event_us | speedup | ferrum_wall_us | cufft_wall_us |
+| ---- | --------------- | -------------- | ------- | -------------- | ------------- |
+| 256  | TBD             | TBD            | TBD     | TBD            | TBD           |
+| 1024 | TBD             | TBD            | TBD     | TBD            | TBD           |
+| 4096 | TBD             | TBD            | TBD     | TBD            | TBD           |
+
+`speedup = cufft_event_us / ferrum_event_us`. Event-time excludes launch
+path; wall-clock includes it. cuFFT's plan-init cost is amortised across
+the bench loop and is not counted.
 
 ## Testing
 
