@@ -12,7 +12,6 @@ cuda-device = { workspace = true }
 cuda-host = { workspace = true }
 cudarc = { version = "0.19", default-features = false, features = ["std", "driver", "cufft", "nvrtc", "cuda-13010", "dynamic-loading"] }
 ferrum-gpu-fft = { workspace = true }
-ferrum-gpu-fft-kernels = { path = "../ferrum-gpu-fft-kernels", version = "0.1.0" }
 
 [[bin]]
 name = "cufft-ncu-trace"

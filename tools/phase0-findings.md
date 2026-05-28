@@ -62,20 +62,44 @@ Ratio: 1.09x
 
 Conclusion: Ratio < 1.2x indicates minimal bank-conflict overhead. Drop +1 padding from fft_c2c_4096 design to save shared-mem space and simplify indexing.
 
-## Phase 1 deviation: ferrum-gpu-py switch deferred
+## Phase 1 reverted: cuda-oxide constraint blocks the kernels-crate dedup
 
-Plan Task 1.5 switches `ferrum-gpu-py` to consume the kernels crate. Deferred to
-Phase 5/6 because the cdylib loads PTX from its own `.so` via `dladdr` +
-`artifact_bundles_from_binary_path` filtered by `CARGO_PKG_NAME`. Switching to
-the kernels crate requires loading a second bundle (the kernels crate's PTX
-also linked into the `.so`) and routing calls across two `LoadedModule`s, since
-`transpose_complex_pow2` stays in the py crate for now (only consumer).
+The spec proposed a single `ferrum-gpu-fft-kernels` library crate consumed by
+the example + bench + py. After implementation this hit two compounding
+cuda-oxide constraints:
 
-Bench + example consumers DID switch (Phase 1 Tasks 1.3 + 1.4). Dedup payoff
-preserved on the perf-critical path. Python wheel keeps the v0.1 inlined
-`fft_radix2_c2c_pow2_1d` + `transpose_complex_pow2` until Phase 5 (when the
-specialised kernels need a Python-facing dispatch and we sort out the
-multi-module loader).
+1. `#[cuda_module]` embeds PTX into the **building binary crate only**. The
+   PTX bundle is named after the building crate's `CARGO_PKG_NAME`. The
+   bundle does **not** propagate through library-crate rlibs into downstream
+   binaries (verified empirically: `cargo oxide run` produced binaries that
+   linked the kernels crate's code but did not embed its PTX bundle; runtime
+   loader failed with `embedded CUDA module 'ferrum-gpu-fft-kernels' was not
+   found`).
+
+2. cuda-oxide's macro explicitly rejects `#[path = "..."] mod kernels;`
+   declarations with `cuda_module requires an inline module so kernel
+   signatures are visible`. This blocks the include-by-path workaround
+   (which would otherwise let one source file expand into multiple inline
+   modules at the proc-macro layer). `include!` inside the module body
+   doesn't work either because `#[cuda_module]` runs before declarative
+   macros expand and sees no `#[kernel]` functions.
+
+**Resolution**: revert Phase 1 entirely. Each binary keeps its own inline
+`#[cuda_module] mod kernels { ... }` with the kernel source duplicated. New
+specialised kernels in Phase 3-5 (fft_c2c_256 / 1024 / 4096) are added to
+each consumer separately. v0.1 already paid this duplication cost; v0.2 stays
+on the same footing.
+
+The kernel function was renamed `fft_radix2_c2c_pow2_1d -> fft_radix2_c2c_pow2_1d_fallback`
+at the inline definitions in `examples/fft-1d-c2c/src/main.rs` and
+`crates/ferrum-gpu-bench/src/main.rs` so the name is forward-compatible with
+the Phase 3+ KernelKind dispatch. The py crate stays on the original name for
+this phase (py is untouched).
+
+Follow-up for v0.3+ (out of scope for v0.2): file an upstream issue at
+`NVlabs/cuda-oxide` for library-crate PTX propagation, or design a
+build-script-based workaround that emits PTX to a known path each consumer
+loads via `cuda_core::CudaContext::load_module_from_image`.
 
 ## Phase 0 summary
 

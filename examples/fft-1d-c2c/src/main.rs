@@ -43,7 +43,7 @@ mod kernels {
     /// N/2 apart), runs `log_n` Stockham stages with a per-stage barrier,
     /// then stores the result back to global memory.
     #[kernel]
-    pub(crate) fn fft_radix2_c2c_pow2_1d(
+    pub(crate) fn fft_radix2_c2c_pow2_1d_fallback(
         in_data: &[f32],
         twiddles: &[f32],
         mut out_data: DisjointSlice<f32>,
@@ -260,7 +260,7 @@ fn run_case(
         block_dim: (block_threads, 1, 1),
         shared_mem_bytes: 0,
     };
-    module.fft_radix2_c2c_pow2_1d(
+    module.fft_radix2_c2c_pow2_1d_fallback(
         stream.as_ref(),
         cfg,
         &dbuf_in,
