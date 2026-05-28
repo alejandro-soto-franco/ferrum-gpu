@@ -89,14 +89,12 @@ ptx-radix8-regreport:
 	RUSTFLAGS="-C link-arg=-Xptxas=-v" cargo build --release --bin radix8-regreport 2>&1 | grep -E "registers|spill|stack"
 
 phase0:
-	cargo build --release --bin cufft-ncu-trace
-	cargo run --release --bin cusimd-ptx-dump
-	make ptx-cusimd-dump 2>&1 | grep -E "ld\.global\." | head
-	make ptx-radix8-regreport
-	cargo run --release --bin launch-overhead-microbench
-	cargo run --release --bin smem-bank-conflict-probe
+	cd crates/ferrum-gpu-bench && cargo oxide run --bin cufft-ncu-trace && cd ../..
+	cd crates/ferrum-gpu-bench && cargo oxide run --bin cusimd-ptx-dump && cd ../..
+	cd crates/ferrum-gpu-bench && cargo oxide run --bin launch-overhead-microbench && cd ../..
+	cd crates/ferrum-gpu-bench && cargo oxide run --bin smem-bank-conflict-probe && cd ../..
 	@echo
-	@echo "Note: cufft-ncu-trace must be run under 'ncu' separately; see Task 0.1 step 5."
+	@echo "Note: Task 0.1 step 5 requires: ncu --set full --csv target/release/cufft-ncu-trace"
 
 clean:
 	cargo clean
