@@ -8,11 +8,9 @@
 
 use anyhow::Result;
 
-use ferrum_gpu_bench::{
-    BATCH, alternating_bench, define_fft_radix2_kernels, fallback_launch_cfg, init_cuda_contexts,
-};
+use ferrum_gpu_bench::{BATCH, alternating_bench, fallback_launch_cfg, init_cuda_contexts};
 
-define_fft_radix2_kernels!();
+include!("../../../ferrum-gpu-fft-kernels/src/kernels_body.rs");
 
 const TARGETS: &[u32] = &[8, 10, 12];
 const GATE_RATIO: f64 = 0.9;

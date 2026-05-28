@@ -10,11 +10,10 @@
 use anyhow::Result;
 
 use ferrum_gpu_bench::{
-    BATCH, LOG_NS, TRIALS, WARMUP, alternating_bench, define_fft_radix2_kernels,
-    fallback_launch_cfg, init_cuda_contexts,
+    BATCH, LOG_NS, TRIALS, WARMUP, alternating_bench, fallback_launch_cfg, init_cuda_contexts,
 };
 
-define_fft_radix2_kernels!();
+include!("../../ferrum-gpu-fft-kernels/src/kernels_body.rs");
 
 fn main() -> Result<()> {
     let (core_ctx, cudarc_ctx) = init_cuda_contexts()?;

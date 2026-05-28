@@ -1,27 +1,21 @@
-//! Single-source-of-truth for ferrum-gpu-fft kernels.
+//! Source of truth for the ferrum-gpu-fft kernels.
 //!
-//! cuda-oxide's `#[cuda_module]` embeds PTX into the building binary crate only,
-//! not propagated through library-crate rlibs. So each consumer
-//! (`examples/fft-1d-c2c`, `crates/ferrum-gpu-bench`, `crates/ferrum-gpu-py`)
-//! must wrap its own `#[cuda_module] mod kernels` declaration. To keep ONE
-//! source of truth for kernel definitions, the kernel bodies live in
-//! `kernels_body.rs` and each consumer attaches that file as its `kernels`
-//! module via `#[path = ".../kernels_body.rs"] mod kernels;`.
+//! This crate hosts `src/kernels_body.rs`, which contains the full
+//! `#[cuda_module] mod kernels { ... }` block for the in-tree FFT kernels.
+//! Consumer binaries (`crates/ferrum-gpu-bench`, `examples/fft-1d-c2c`,
+//! `crates/ferrum-gpu-py`) attach the kernel module via
+//! `include!(".../kernels_body.rs");` at the top of their crate root.
 //!
-//! This crate's own `#[cuda_module] mod kernels` exists for hosting
-//! kernel-cross-check tests under `tests/`. Downstream binaries do not depend
-//! on this crate; they attach `kernels_body.rs` directly via `#[path]`.
+//! Why no `#[cuda_module]` here, and no `pub mod kernels`: cuda-oxide's
+//! `#[cuda_module]` proc macro requires an INLINE module (it rejects
+//! `#[path]` file modules) AND embeds PTX into the binary crate that owns
+//! the include site (it does not propagate through library rlibs). So we
+//! cannot host a usable `LoadedModule` in a library; the consuming binary
+//! must own its own copy of the module via `include!`.
+//!
+//! See `kernels_body.rs` for the header that documents the include
+//! contract from the consumer side.
 
-#![warn(unsafe_op_in_unsafe_fn)]
-#![warn(unreachable_pub)]
-
-use cuda_host::cuda_module;
-
-#[cuda_module]
-#[path = "kernels_body.rs"]
-pub mod kernels;
-
-pub use kernels::LoadedModule;
-
-/// Absolute filesystem path to `kernels_body.rs`. Useful for diagnostics.
+/// Absolute filesystem path to `kernels_body.rs`, useful for diagnostics
+/// and tooling.
 pub const KERNELS_BODY_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/kernels_body.rs");
