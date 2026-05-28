@@ -40,10 +40,10 @@ Decision on `__launch_bounds__(512, 1)`: deferred to Phase 3 based on perf-gate 
 
 | Stack    | Median empty-launch (us) |
 | -------- | ------------------------ |
-| cuda-core | ?                       |
-| cudarc    | ?                       |
+| cuda-core | 2.046                   |
+| cudarc    | 2.047                   |
 
-Gap: ? us. Action: ?
+Gap: -0.000 us (negligible). No wall-clock overhead footnote needed.
 
 ## Task 0.5: Shared-mem bank conflicts
 
