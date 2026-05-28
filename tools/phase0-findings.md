@@ -47,6 +47,8 @@ Gap: -0.000 us (negligible). No wall-clock overhead footnote needed.
 
 ## Task 0.5: Shared-mem bank conflicts
 
-Stride-256 read with +0 pad: ? cycles/iter
-Stride-256 read with +1 pad: ? cycles/iter
-Conclusion: ?
+Stride-256 read with +0 pad: 7.991 us
+Stride-256 read with +1 pad: 7.310 us
+Ratio: 1.09x
+
+Conclusion: Ratio < 1.2x indicates minimal bank-conflict overhead. Drop +1 padding from fft_c2c_4096 design to save shared-mem space and simplify indexing.
