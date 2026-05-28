@@ -5,6 +5,7 @@ members = [
     "crates/ferrum-gpu-cuda",
     "crates/ferrum-gpu",
     "crates/ferrum-gpu-fft",
+    "crates/ferrum-gpu-fft-kernels",
     "examples/vector-add",
     "examples/vector-add-cuda-oxide",
     "examples/fft-1d-c2c",
