@@ -13,5 +13,25 @@ cuda-host = { workspace = true }
 cudarc = { version = "0.19", default-features = false, features = ["std", "driver", "cufft", "cuda-13010", "dynamic-loading"] }
 ferrum-gpu-fft = { workspace = true }
 
+[[bin]]
+name = "cufft-ncu-trace"
+path = "src/bin/cufft-ncu-trace.rs"
+
+[[bin]]
+name = "cusimd-ptx-dump"
+path = "src/bin/cusimd-ptx-dump.rs"
+
+[[bin]]
+name = "radix8-regreport"
+path = "src/bin/radix8-regreport.rs"
+
+[[bin]]
+name = "launch-overhead-microbench"
+path = "src/bin/launch-overhead-microbench.rs"
+
+[[bin]]
+name = "smem-bank-conflict-probe"
+path = "src/bin/smem-bank-conflict-probe.rs"
+
 [lints]
 workspace = true
