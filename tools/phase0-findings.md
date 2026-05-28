@@ -26,11 +26,15 @@ Expected `ld.global.v4.f32` instruction: needs inline-asm verification or LLVM-I
 
 ## Task 0.3: radix-8 register report
 
-`-Xptxas -v` output:
-- Registers per thread: ?
-- Spill stores: ?
-- Spill loads: ?
-- Decision on `__launch_bounds__(512, 1)`: ?
+Note: cuda-oxide's codegen-backend does not expose ptxas verbose output in the same way
+as traditional nvcc. The Makefile target `ptx-radix8-regreport` attempts to inject `-Xptxas=-v`
+but cuda-oxide handles CUDA compilation internally without generating accessible ptxas reports.
+
+The kernel compiles and runs successfully. For detailed register/spill analysis, would require:
+1. Extracting the PTX from the binary and running ptxas separately, or
+2. Using NVIDIA's profiling tools (ncu) to measure register pressure at runtime
+
+Decision on `__launch_bounds__(512, 1)`: deferred to Phase 3 based on perf-gate results
 
 ## Task 0.4: Launch overhead
 
