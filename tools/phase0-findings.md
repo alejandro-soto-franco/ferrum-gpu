@@ -52,3 +52,12 @@ Stride-256 read with +1 pad: 7.310 us
 Ratio: 1.09x
 
 Conclusion: Ratio < 1.2x indicates minimal bank-conflict overhead. Drop +1 padding from fft_c2c_4096 design to save shared-mem space and simplify indexing.
+
+## Phase 0 summary
+
+Design adjustments for Phase 3+:
+- [x] CuSimd v4 lowering: deferred (cuda-oxide doesn't expose PTX separately; functional correctness verified)
+- [x] fft_c2c_4096 launch_bounds: deferred to Phase 3 based on perf-gate results
+- [x] fft_c2c_4096 SMEM +1 padding: drop (ratio 1.09x < 1.2x threshold)
+- [x] Wall-clock vs event-time gap to footnote: 0.000 us (negligible, no footnote needed)
+- [ ] cuFFT kernel-name reference: see `tools/ncu/cufft-blackwell-2026-05.txt` (operator-driven, Task 0.1 step 5)
