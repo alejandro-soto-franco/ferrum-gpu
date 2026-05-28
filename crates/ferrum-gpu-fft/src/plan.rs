@@ -12,6 +12,31 @@ pub enum Direction {
     Inverse,
 }
 
+/// Which specialised kernel a `Plan` dispatches to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KernelKind {
+    /// One-warp-per-FFT register + shuffle kernel for log_n = 8 (N = 256).
+    Specialised256,
+    /// 4-warp-per-FFT, 1 shared-mem exchange kernel for log_n = 10 (N = 1024).
+    Specialised1024,
+    /// Single-block radix-8 kernel for log_n = 12 (N = 4096).
+    Specialised4096,
+    /// v0.1 generic Stockham radix-2 kernel for any other supported size.
+    GenericPow2,
+}
+
+impl KernelKind {
+    /// Pick the kernel kind for a forward C2C plan of the given size.
+    pub fn for_forward_pow2(log_n: u32) -> Self {
+        match log_n {
+            8 => KernelKind::Specialised256,
+            10 => KernelKind::Specialised1024,
+            12 => KernelKind::Specialised4096,
+            _ => KernelKind::GenericPow2,
+        }
+    }
+}
+
 /// A 1D radix-2 power-of-2 C2C plan.
 #[derive(Clone, Debug)]
 pub struct Plan {
@@ -23,6 +48,8 @@ pub struct Plan {
     pub normalize: bool,
     /// Twiddle table laid out per stage (see `twiddles::twiddles`).
     pub twiddles_host: Vec<Complex32>,
+    /// Which kernel this plan dispatches to.
+    pub kernel_kind: KernelKind,
 }
 
 impl Plan {
@@ -30,7 +57,8 @@ impl Plan {
     pub fn new(log_n: u32, batch: usize, normalize: bool) -> Self {
         assert!((2..=12).contains(&log_n), "log_n must be in [2, 12]");
         let twiddles_host = twiddles::twiddles(log_n);
-        Self { log_n, batch, normalize, twiddles_host }
+        let kernel_kind = KernelKind::for_forward_pow2(log_n);
+        Self { log_n, batch, normalize, twiddles_host, kernel_kind }
     }
 
     /// Transform length: `1 << log_n`.
