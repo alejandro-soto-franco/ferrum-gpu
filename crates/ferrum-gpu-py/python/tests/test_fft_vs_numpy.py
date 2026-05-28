@@ -3,12 +3,12 @@
 import numpy as np
 import pytest
 
-import ferrum_gpu as fg
+import ferrum_gpu as fgpu
 
 
 @pytest.fixture(scope="module")
 def device():
-    return fg.cuda.Device(0)
+    return fgpu.cuda.Device(0)
 
 
 def _input_signal(n: int, batch: int) -> np.ndarray:
@@ -55,7 +55,7 @@ def test_gpu_fft_matches_numpy(device, log_n, batch, direction, normalize, label
     kwargs = {"log_n": log_n, "direction": direction, "normalize": normalize}
     if use_device:
         kwargs["device"] = device
-    out = fg.fft.fft_1d_c2c_pow2(inp, **kwargs)
+    out = fgpu.fft.fft_1d_c2c_pow2(inp, **kwargs)
     assert out.shape == inp.shape, f"{label} (use_device={use_device}): shape mismatch"
 
     diff = out - expected

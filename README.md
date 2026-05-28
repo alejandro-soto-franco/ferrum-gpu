@@ -2,7 +2,27 @@
 
 Pure-Rust GPU compute substrate with Python bindings. FFT kernels run on NVIDIA GPUs today via [cuda-oxide](https://github.com/NVlabs/cuda-oxide) (Rust source compiled to PTX, no CUDA C). Cross-vendor support via spirv-oxide → Vulkan is the v0.2 roadmap.
 
-This is `v0.1.0`. The workspace ships:
+`v0.1.0` is live on PyPI:
+
+```bash
+pip install ferrum-gpu
+# or, faster:
+uv pip install ferrum-gpu
+```
+
+```python
+import numpy as np
+import ferrum_gpu as fgpu
+
+dev = fgpu.cuda.Device(0)
+arr = np.array([1+0j, 2+0j, 3+0j, 4+0j], dtype=np.complex64)
+print(fgpu.fft.fft_1d_c2c_pow2(arr, log_n=2, device=dev))
+# [10+0j, -2+2j, -2+0j, -2-2j]
+```
+
+29 GPU integration tests verify the 1D and 2D Stockham FFTs against `numpy.fft.fft` / `numpy.fft.fft2` (1D: 16 cases, 2D: 13 cases) within 1e-3 to 1e-4 relative error.
+
+The workspace ships:
 
 - `ferrum-gpu-core`: `Backend` trait, `KernelArtifact`, errors. `no_std + alloc`.
 - `ferrum-gpu-cuda`: `impl Backend for Cuda` over `cudarc` 0.19.
@@ -14,16 +34,22 @@ This is `v0.1.0`. The workspace ships:
 - `examples/vector-add-cuda-oxide`: same kernel in Rust, compiled to PTX by cuda-oxide.
 - `examples/fft-1d-c2c`: 1D Stockham FFT in Rust, GPU-vs-CPU on 8 cases (N from 4 to 4096, batched, forward + inverse).
 
-29 GPU pytest cases verified end-to-end against `numpy.fft.fft` / `numpy.fft.fft2` (1D: 16 cases, 2D: 13 cases) within 1e-3 to 1e-4 relative error.
+## Runtime requirements (wheel users)
 
-## Requirements
+- Linux x86_64 with glibc >= 2.34 (Ubuntu 22.04+, RHEL 9+, Fedora 36+, etc.)
+- NVIDIA driver supporting CUDA 13.x (driver 580+)
+- Python 3.10+
+
+The wheel does not bundle `libcuda`; users need the NVIDIA driver installed.
+
+## Source build requirements (developers)
 
 - Linux x86_64
 - CUDA Toolkit 13.x
 - NVIDIA driver compatible with the installed Toolkit
 - Rust nightly `2026-04-03` (pinned via `rust-toolchain.toml`)
 - `cargo-oxide`: `cargo install --git https://github.com/NVlabs/cuda-oxide.git cargo-oxide`
-- For the Python bindings: Python 3.10+ with maturin + numpy + pytest
+- For the Python bindings: Python 3.10+ with `maturin` + `pytest` + `numpy`
 
 ## Quick start: vector-add via hand-written PTX
 
@@ -59,11 +85,9 @@ make example-fft
 
 Runs 8 cases (N=4 through N=4096, batched, forward + inverse), each verified against a CPU Stockham reference within 1e-4 relative error.
 
-## Quick start: Python
+## Python development
 
-[`uv`](https://github.com/astral-sh/uv) is the recommended Python package manager;
-the Makefile targets and the wheel install path work the same on `pip` for users
-who prefer it.
+[`uv`](https://github.com/astral-sh/uv) is the Python package manager written in Rust by Astral; it is a drop-in faster replacement for `pip` + `venv`. The Makefile targets and the wheel install path work the same on `pip` for users who prefer it.
 
 ```bash
 uv venv ~/.venvs/ferrum-gpu
@@ -71,9 +95,9 @@ source ~/.venvs/ferrum-gpu/bin/activate
 uv pip install maturin pytest numpy
 make develop                       # builds the cdylib + installs into the venv
 python3 -c "
-import numpy as np, ferrum_gpu as fg
+import numpy as np, ferrum_gpu as fgpu
 arr = np.array([1+0j, 2+0j, 3+0j, 4+0j], dtype=np.complex64)
-print(fg.fft.fft_1d_c2c_pow2(arr, log_n=2))
+print(fgpu.fft.fft_1d_c2c_pow2(arr, log_n=2))
 "
 ```
 
@@ -118,30 +142,17 @@ CPU-only tests: `make test`.
 
 GPU tests + all examples + pytest (requires CUDA + NVIDIA GPU): `make verify-all`.
 
-## Publishing (PyPI wheel)
+## Publishing a new release
 
-The public wheel is built inside a `manylinux_2_28_x86_64` Docker image
-that ships CUDA Toolkit 13.x, the cuda-oxide-pinned Rust nightly, and
-maturin. The container is ~6-8 GB and takes ~15-25 minutes to build the
-first time.
+Maintainers only. The public wheel is built locally via maturin (manylinux_2_34 tag forced via `--compatibility`, `libcuda` excluded via `--auditwheel skip`) then attached to a GitHub Release. The `release.yml` workflow downloads the asset and uploads to PyPI via OIDC trusted publishing.
 
 ```bash
-make wheel-manylinux        # builds dist/ferrum_gpu-*-manylinux_2_28_x86_64.whl
-auditwheel show dist/*.whl  # verify the manylinux tag
+make wheel             # builds dist/ferrum_gpu-*-manylinux_2_34_x86_64.whl
+gh release create vX.Y.Z dist/*.whl --title "vX.Y.Z" --notes "..."
+gh workflow run release.yml --field release_tag=vX.Y.Z --field target_index=pypi
 ```
 
-Publishing to PyPI is operator-driven (no CI):
-
-```bash
-# TestPyPI first
-twine upload --repository testpypi dist/*.whl
-
-# PyPI (requires a token in ~/.pypirc)
-twine upload dist/*.whl
-```
-
-The local-build path (`make develop` + `make wheel`) produces a wheel
-tagged `linux_x86_64` (not manylinux). Useful for local testing only.
+For a glibc 2.28 baseline (RHEL 8, Ubuntu 20.04), use `make wheel-manylinux` instead; it runs the build inside a manylinux_2_28 Docker image.
 
 ## License
 

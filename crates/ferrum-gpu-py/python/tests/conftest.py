@@ -2,9 +2,9 @@
 
 import pytest
 
-import ferrum_gpu as fg
+import ferrum_gpu as fgpu
 
 
 @pytest.fixture(scope="session")
-def fg_module():
-    return fg
+def fgpu_module():
+    return fgpu
