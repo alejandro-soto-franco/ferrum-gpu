@@ -96,5 +96,12 @@ phase0:
 	@echo
 	@echo "Note: Task 0.1 step 5 requires: ncu --set full --csv target/release/cufft-ncu-trace"
 
+.PHONY: gpu-lock bench-locked
+gpu-lock:
+	./tools/bench-gpu-lock.sh
+
+bench-locked:
+	./tools/bench-gpu-lock.sh make bench
+
 clean:
 	cargo clean
