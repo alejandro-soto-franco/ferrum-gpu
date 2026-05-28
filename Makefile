@@ -80,5 +80,23 @@ fmt:
 clippy:
 	cargo clippy --workspace --all-targets --exclude vector-add-cuda-oxide --exclude fft-1d-c2c --exclude ferrum-gpu-py -- -D warnings
 
+.PHONY: ptx-cusimd-dump ptx-radix8-regreport phase0
+ptx-cusimd-dump:
+	cargo build --release --bin cusimd-ptx-dump
+	@find /home/cargo-targets/ferrum-gpu -name 'cusimd_ptx_dump*.ptx' -exec cat {} \;
+
+ptx-radix8-regreport:
+	RUSTFLAGS="-C link-arg=-Xptxas=-v" cargo build --release --bin radix8-regreport 2>&1 | grep -E "registers|spill|stack"
+
+phase0:
+	cargo build --release --bin cufft-ncu-trace
+	cargo run --release --bin cusimd-ptx-dump
+	make ptx-cusimd-dump 2>&1 | grep -E "ld\.global\." | head
+	make ptx-radix8-regreport
+	cargo run --release --bin launch-overhead-microbench
+	cargo run --release --bin smem-bank-conflict-probe
+	@echo
+	@echo "Note: cufft-ncu-trace must be run under 'ncu' separately; see Task 0.1 step 5."
+
 clean:
 	cargo clean

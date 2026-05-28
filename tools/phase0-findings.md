@@ -17,8 +17,12 @@ Output: `tools/ncu/cufft-blackwell-<date>.txt`
 
 ## Task 0.2: CuSimd<f32, 4> PTX lowering
 
-Generated PTX file: `crates/ferrum-gpu-bench/cusimd_ptx_dump.ptx`
-Expected `ld.global.v4.f32` instruction: ?
+Note: cuda-oxide embeds PTX directly in the binary; separate .ptx files are not generated.
+The kernel compiles successfully and executes correctly. Inspection requires disassembly of the binary
+or examining LLVM-IR during compilation. For now, functional correctness is verified by the successful execution
+and matching of input/output values in the kernel test.
+
+Expected `ld.global.v4.f32` instruction: needs inline-asm verification or LLVM-IR inspection
 
 ## Task 0.3: radix-8 register report
 
