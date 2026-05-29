@@ -26,6 +26,10 @@ name = "perf-gate"
 path = "src/bin/perf-gate.rs"
 
 [[bin]]
+name = "kernel-cross-check"
+path = "src/bin/kernel-cross-check.rs"
+
+[[bin]]
 name = "cufft-ncu-trace"
 path = "src/bin/cufft-ncu-trace.rs"
 

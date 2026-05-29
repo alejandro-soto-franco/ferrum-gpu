@@ -1,4 +1,4 @@
-.PHONY: check test test-gpu example-vector-add example-vector-add-oxide example-fft bench develop wheel pytest verify-all fmt clippy clean
+.PHONY: check test test-gpu example-vector-add example-vector-add-oxide example-fft kernel-cross-check bench develop wheel pytest verify-all fmt clippy clean
 
 # cuda-oxide-codegen-backend RUSTFLAGS used by maturin when building the
 # Python cdylib. Mirrors what cargo-oxide sets internally for `cargo oxide run/build`.
@@ -24,6 +24,9 @@ example-vector-add-oxide:
 
 example-fft:
 	cargo oxide run fft-1d-c2c --bin fft-1d-c2c
+
+kernel-cross-check:
+	cargo oxide run ferrum-gpu-bench --bin kernel-cross-check
 
 bench:
 	cargo oxide run ferrum-gpu-bench --bin ferrum-gpu-bench
@@ -70,7 +73,7 @@ pytest: develop
 	  VIRTUAL_ENV=$(VENV) PATH=$(VENV)/bin:$$PATH \
 	  $(VENV)/bin/pytest python/tests -v
 
-verify-all: check test-gpu example-vector-add example-vector-add-oxide example-fft pytest bench
+verify-all: check test-gpu example-vector-add example-vector-add-oxide example-fft kernel-cross-check pytest bench
 	@echo
 	@echo "=== ALL CHECKS PASSED ==="
 
