@@ -19,7 +19,9 @@ mod four_step {
     use ::cuda_device::cooperative_groups::{ThreadGroup, WarpCollective, this_thread_block};
     use ::cuda_device::{DisjointSlice, SharedArray, kernel, thread};
 
-    const NW: usize = 8; // warps per block (block_dim = 256)
+    const NW: usize = 32; // warps per block (block_dim = 1024, the CUDA max):
+    // 64 columns / 32 warps = 2 waves per pass, vs 8 with 256 threads.
+    const BLOCK_THREADS: usize = NW * 32;
 
     /// 1D forward C2C FFT, N=4096, one block per transform, 256 threads.
     ///
@@ -34,7 +36,11 @@ mod four_step {
         w4096: &[f32],
         mut out_data: DisjointSlice<f32>,
     ) {
-        static mut BUF: SharedArray<f32, 8192> = SharedArray::UNINIT; // 4096 complex
+        // 64 rows x 65 complex (padded stride) = 8320 f32 = 33.3 KiB. The +1
+        // pad turns step-1's stride-64 column reads from a 32-way shared bank
+        // conflict into a 2-way one. Physical slot = outer*STRIDE + inner.
+        static mut BUF: SharedArray<f32, 8320> = SharedArray::UNINIT;
+        const STRIDE: usize = 65;
 
         let warp = this_thread_block().tiled_partition::<32>();
         let lane = warp.thread_rank() as usize;
@@ -45,15 +51,19 @@ mod four_step {
         // 5-bit reversal of the lane.
         let br = ((lane & 1) << 4) | ((lane & 2) << 2) | (lane & 4) | ((lane & 8) >> 2) | ((lane & 16) >> 4);
 
-        // Load 4096 complex into shared.
+        // Load 4096 complex into shared at physical (n2*STRIDE + n1) for
+        // natural index n = n1 + 64*n2.
         {
             let mut t = thread::threadIdx_x() as usize;
             while t < 4096 {
+                let n1 = t & 63;
+                let n2 = t >> 6;
+                let p = 2 * (n2 * STRIDE + n1);
                 unsafe {
-                    BUF[2 * t] = in_data[base + 2 * t];
-                    BUF[2 * t + 1] = in_data[base + 2 * t + 1];
+                    BUF[p] = in_data[base + 2 * t];
+                    BUF[p + 1] = in_data[base + 2 * t + 1];
                 }
-                t += 256;
+                t += BLOCK_THREADS;
             }
         }
         thread::sync_threads();
@@ -109,8 +119,9 @@ mod four_step {
         {
             let mut col = wib;
             while col < 64 {
-                let i0 = 2 * (col + 64 * lane);
-                let i1 = 2 * (col + 64 * (lane + 32));
+                // column n1 = col; element n2 = lane (e0) and lane+32 (e1).
+                let i0 = 2 * (lane * STRIDE + col);
+                let i1 = 2 * ((lane + 32) * STRIDE + col);
                 let mut e0r = unsafe { BUF[i0] };
                 let mut e0i = unsafe { BUF[i0 + 1] };
                 let mut e1r = unsafe { BUF[i1] };
@@ -132,8 +143,9 @@ mod four_step {
                 let c1r = e1r * wbr - e1i * wbi;
                 let c1i = e1r * wbi + e1i * wbr;
 
-                let o0 = 2 * (col + 64 * k2a);
-                let o1 = 2 * (col + 64 * k2b);
+                // write C[n1=col][k2] at physical (k2*STRIDE + col).
+                let o0 = 2 * (k2a * STRIDE + col);
+                let o1 = 2 * (k2b * STRIDE + col);
                 unsafe {
                     BUF[o0] = c0r;
                     BUF[o0 + 1] = c0i;
@@ -149,8 +161,9 @@ mod four_step {
         {
             let mut row = wib;
             while row < 64 {
-                let i0 = 2 * (lane + 64 * row);
-                let i1 = 2 * ((lane + 32) + 64 * row);
+                // row k2 = row; read C[a][k2] at (row*STRIDE + a), a = lane / lane+32.
+                let i0 = 2 * (row * STRIDE + lane);
+                let i1 = 2 * (row * STRIDE + (lane + 32));
                 let mut e0r = unsafe { BUF[i0] };
                 let mut e0i = unsafe { BUF[i0 + 1] };
                 let mut e1r = unsafe { BUF[i1] };

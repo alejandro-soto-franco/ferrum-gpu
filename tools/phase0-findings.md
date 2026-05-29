@@ -210,11 +210,40 @@ Building block proven (`warp_fft32` kernel + `warp-fft-spike` bin, CPU model
   approach, with no tuning and no four-step composition yet.
 
 Confirms: `shfl_xor_f32` lowers and runs correctly through cuda-oxide; the
-warp-register FFT is the right structure. Next: 64-pt warp FFT (2 elts/lane),
-then compose `fft_c2c_4096_4step` (64 column FFTs in registers -> twiddle ->
-one shared transpose -> 64 row FFTs), CPU-model-first as usual. FMA still
-caps us ~10-20% below nvcc (no `mul_add` lowering); an `asm!` `fma.rn.f32`
-helper for the inner butterfly is the eventual closer if needed.
+warp-register FFT is the right structure.
+
+### Four-step 64x64 GPU kernel: CORRECT but not yet competitive
+
+Built `fft_c2c_4096_4step` (`four_step_body.rs` + `four-step-spike` bin),
+CPU-modelled first (`warp_fft::four_step_model`, verified == radix-2). On GPU:
+
+- Correct: max_rel_err 1.36e-4 vs radix-2 CPU reference.
+- Perf (ratio vs cuFFT, batch=256): 256 thr/block 10.2 -> +65-stride SMEM pad
+  9.97 -> 1024 thr/block (32 warps, 2 waves) 8.30. **Still worse than the
+  tuned shared-memory radix-8 kernel (3.80).**
+
+So the four-step as composed is a regression, not a win. The 32-pt spike was
+fast (19.7 Gpt/s) because of massive parallelism (65536 warps) and no
+shared/sync/twiddle-table overhead; the single-block 4096 four-step has the
+opposite profile: only 256 heavy blocks, a full 4096-complex shared load, two
+1024-thread barriers, a 4096-entry global W_4096 table read scattered per
+butterfly, and DIVERGENT warp butterflies (`if lane & d`). Diagnosing which of
+these dominates needs `ncu` perf counters (root-gated here:
+`ERR_NVGPUCTRPERM`), so further blind iteration is low-value.
+
+DECISION: keep the radix-8 kernel as the production fft_c2c_4096. The
+four-step is committed as a documented research artifact (NOT wired into any
+consumer). Closing the cuFFT gap from here is a profiler-guided,
+multi-session effort. Concrete next levers when resumed:
+- profile under `ncu` (set `NVreg_RestrictProfilingToAdminUsers=0` or sudo) to
+  find the actual bottleneck before changing anything;
+- branchless warp butterfly (arithmetic select instead of `if lane & d`) to
+  kill warp divergence;
+- stage the W_4096 twiddles in shared or compute on-chip (sincos) instead of a
+  scattered 4096-entry global table;
+- consider the two-kernel four-step (full batch parallelism per pass) vs the
+  single-kernel on-chip tradeoff (extra global round-trip ~16 MB/batch);
+- `asm!` `fma.rn.f32` for the inner butterflies (cuda-oxide emits none).
 
 ### PTX-quality probe (Task 3.5b) — cuda-oxide IS a major bottleneck
 

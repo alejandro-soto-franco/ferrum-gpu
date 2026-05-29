@@ -45,7 +45,7 @@ fn launch(
     d_w4096: &DeviceBuffer<f32>,
     d_out: &mut DeviceBuffer<f32>,
 ) -> Result<()> {
-    let cfg = LaunchConfig { grid_dim: (batch as u32, 1, 1), block_dim: (256, 1, 1), shared_mem_bytes: 0 };
+    let cfg = LaunchConfig { grid_dim: (batch as u32, 1, 1), block_dim: (1024, 1, 1), shared_mem_bytes: 0 };
     module.fft_c2c_4096_4step(stream, cfg, d_in, d_w64, d_w4096, d_out)?;
     Ok(())
 }
