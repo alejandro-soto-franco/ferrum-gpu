@@ -120,24 +120,35 @@ make pytest
 
 ## Performance
 
-`make perf-gate` runs the in-tree specialised kernels against cuFFT 12.x
-for batched 1D forward C2C FFTs at N in {256, 1024, 4096}, batch = 256,
-with the GPU graphics clock locked via `tools/bench-gpu-lock.sh`. The
-gate passes if `ferrum_event_us` is at most `0.9 * cufft_event_us` on
-every size. Numbers below are medians over 100 trials with 10-trial
-warmup, alternating ferrum and cuFFT launches per trial.
+`make perf-gate` runs the in-tree specialised kernels against cuFFT for
+batched 1D forward C2C FFTs at N in {256, 1024, 4096}, batch = 256, with the
+GPU graphics clock locked. Numbers below are medians over 100 trials with a
+10-trial warmup, alternating ferrum and cuFFT launches per trial so DVFS
+affects both backends symmetrically.
 
-Hardware: RTX 5060 Laptop (sm_120, Blackwell). Driver: TBD. CUDA Toolkit: TBD. Date: TBD.
+These are pure-Rust kernels (Rust → PTX via cuda-oxide; no CUDA C) measured
+against NVIDIA's hand-tuned cuFFT. The specialised radix-4 (256, 1024) and
+radix-8 (4096) Stockham kernels are 2–5× faster than the generic radix-2
+fallback; against cuFFT they range from within 1.3× at N=256 to 3.7× at
+N=4096.
 
-| N    | ferrum_event_us | cufft_event_us | speedup | ferrum_wall_us | cufft_wall_us |
-| ---- | --------------- | -------------- | ------- | -------------- | ------------- |
-| 256  | TBD             | TBD            | TBD     | TBD            | TBD           |
-| 1024 | TBD             | TBD            | TBD     | TBD            | TBD           |
-| 4096 | TBD             | TBD            | TBD     | TBD            | TBD           |
+Hardware: RTX 5060 Laptop (sm_120, Blackwell), graphics clock locked to 1500 MHz.
+Driver: 580.159.03. CUDA Toolkit: 13.1. Date: 2026-05-29.
 
-`speedup = cufft_event_us / ferrum_event_us`. Event-time excludes launch
-path; wall-clock includes it. cuFFT's plan-init cost is amortised across
-the bench loop and is not counted.
+| N    | kernel  | ferrum_event_us | cufft_event_us | ratio (ferrum / cufft) |
+| ---- | ------- | --------------- | -------------- | ---------------------- |
+| 256  | radix-4 | 0.035           | 0.026          | 1.32                   |
+| 1024 | radix-4 | 0.102           | 0.047          | 2.13                   |
+| 4096 | radix-8 | 0.509           | 0.137          | 3.69                   |
+
+`ratio = ferrum_event_us / cufft_event_us`; 1.0 is parity, lower is better.
+Event-time brackets each kernel launch with CUDA events (excludes the host
+launch path); cuFFT's plan-init is amortised across the loop and not counted.
+`make perf-gate` reports a 0.9× target (10 % faster than cuFFT); that gate is
+not yet met at any size and is tracked as an aspirational target — closing it
+needs a multi-FFT-per-block, profiler-guided kernel redesign. Per-launch
+wall-clock (which includes the launch path) is measured jointly in alternating
+mode and is ≈ 0.05 / 0.10 / 0.35 µs per FFT at the three sizes.
 
 ## Testing
 
