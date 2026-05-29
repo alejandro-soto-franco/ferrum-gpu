@@ -154,10 +154,44 @@ gap. It does not compile on this box:
 Implication: nvcc cannot build CUDA on this host without patching system CUDA
 headers, so a *nvcc-compiled-PTX* bridge cannot be produced here either.
 cuda-oxide works only because it bypasses nvcc/cudafe with its own LLVM +
-libdevice pipeline. Bridge paths that remain: (a) fix the toolchain (patch
-`crt/math_functions.h` to add `noexcept`, or install a CUDA-supported gcc),
-then nvcc-bridge; (b) hand-author PTX for fft_c2c_4096 (large); (c) accept
-~3.8x and ship with a documented/relaxed gate per spec 5.3.
+libdevice pipeline.
+
+UPDATE: unblocked nvcc by patching `crt/math_functions.h` to add `noexcept`
+to `rsqrt`/`rsqrtf` (backup at `*.bak-precudafix`; a Fedora 44 + CUDA reinstall
+will reset it — re-apply or update to a CUDA toolkit that ships the fix).
+
+### DECISIVE RESULT: the gap is ALGORITHMIC, not codegen
+
+Built and ran `tools/radix8_ceiling.cu` (nvcc -O3, same algorithm). Stable
+over 3 runs:
+
+| Build                         | us/FFT | ratio vs cuFFT |
+| ----------------------------- | ------ | -------------- |
+| cuda-oxide (ours, iter 3)     | ~      | 3.80           |
+| nvcc -O3 (same algorithm)     | ~0.284 | **3.45**       |
+| cuFFT `vector_fft`            | ~0.082 | 1.00           |
+
+nvcc's PTX is fully optimised: 7 `fma.rn.f32`, 0 leftover mul/add/sub, 0
+spills, 3 barriers. Yet the *same algorithm* compiled perfectly is still
+**3.45x slower than cuFFT**. Our cuda-oxide kernel (3.80) is within ~10% of
+that ceiling.
+
+Conclusions:
+1. cuda-oxide is NOT the bottleneck anymore. After the spill fixes (iters
+   1-3) it trails optimal codegen by only ~10% (the FMA + minor residue). The
+   substrate strategy is sound; a nvcc/hand-PTX bridge would buy ~10%, not
+   close the gate. NOT worth building for perf.
+2. cuFFT's 3.4x advantage is its KERNEL DESIGN, not its compiler: mixed-radix,
+   multiple FFTs per block, register blocking, far fewer shared-memory round
+   trips / barriers than one-4096-FFT-per-512-thread-block with 3 barriers.
+3. The 0.9x gate at N=4096 is unreachable without a fundamental algorithmic
+   redesign (and beating cuFFT even then is research-grade). Ship Phase 3 with
+   the gate documented as a tracked target per spec Section 5.3.
+
+Further pure-source micro-opts (Task 3.5a: launch_bounds, dual-buffer, SMEM
+twiddles) are bounded above by the nvcc 3.45 ceiling, so they cannot reach
+0.9x either. Stop the perf loop here; correctness + the ~2x codegen recovery
+are the shipped wins.
 
 ### PTX-quality probe (Task 3.5b) — cuda-oxide IS a major bottleneck
 
