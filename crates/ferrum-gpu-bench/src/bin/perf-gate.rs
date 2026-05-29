@@ -8,7 +8,10 @@
 
 use anyhow::Result;
 
-use ferrum_gpu_bench::{BATCH, alternating_bench, fallback_launch_cfg, init_cuda_contexts};
+use ferrum_gpu_bench::{
+    BATCH, alternating_bench, fallback_launch_cfg, init_cuda_contexts, spec4096_launch_cfg,
+};
+use ferrum_gpu_fft::KernelKind;
 
 include!("../../../ferrum-gpu-fft-kernels/src/kernels_body.rs");
 
@@ -30,19 +33,34 @@ fn main() -> Result<()> {
         "N", "ferrum_us", "cufft_us", "ratio"
     );
     for &log_n in TARGETS {
-        let cfg = fallback_launch_cfg(log_n);
+        let kind = KernelKind::for_forward_pow2(log_n);
+        let fallback_cfg = fallback_launch_cfg(log_n);
+        let spec4096_cfg = spec4096_launch_cfg();
         let launch_ferrum = |dbuf_in: &cuda_core::DeviceBuffer<f32>,
                              dbuf_tw: &cuda_core::DeviceBuffer<f32>,
                              dbuf_out: &mut cuda_core::DeviceBuffer<f32>|
          -> Result<()> {
-            module.fft_radix2_c2c_pow2_1d_fallback(
-                core_stream.as_ref(),
-                cfg,
-                dbuf_in,
-                dbuf_tw,
-                dbuf_out,
-                log_n,
-            )?;
+            match kind {
+                KernelKind::Specialised4096 => {
+                    module.fft_c2c_4096(
+                        core_stream.as_ref(),
+                        spec4096_cfg,
+                        dbuf_in,
+                        dbuf_tw,
+                        dbuf_out,
+                    )?;
+                }
+                _ => {
+                    module.fft_radix2_c2c_pow2_1d_fallback(
+                        core_stream.as_ref(),
+                        fallback_cfg,
+                        dbuf_in,
+                        dbuf_tw,
+                        dbuf_out,
+                        log_n,
+                    )?;
+                }
+            }
             Ok(())
         };
         let (ferr, cu) = alternating_bench(&core_ctx, &cudarc_ctx, log_n, launch_ferrum)?;

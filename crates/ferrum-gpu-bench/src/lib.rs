@@ -89,8 +89,11 @@ pub fn alternating_bench(
     // --- ferrum (cuda-core) setup ---
     let core_stream = core_ctx.default_stream();
     let input_flat: Vec<f32> = (0..total * 2).map(|i| (i as f32 * 0.001).sin()).collect();
-    let mut twiddles_flat: Vec<f32> = Vec::with_capacity((n - 1) * 2);
-    for c in plan.twiddles() {
+    // Twiddle table matched to the plan's specialised kernel (radix-8 layout
+    // for Specialised4096, radix-2 stage table otherwise).
+    let kernel_tw = plan.kernel_twiddles();
+    let mut twiddles_flat: Vec<f32> = Vec::with_capacity(kernel_tw.len() * 2);
+    for c in &kernel_tw {
         twiddles_flat.push(c.re);
         twiddles_flat.push(c.im);
     }
@@ -192,6 +195,15 @@ pub fn fallback_launch_cfg(log_n: u32) -> LaunchConfig {
     LaunchConfig {
         grid_dim: (BATCH as u32, 1, 1),
         block_dim: (block_threads, 1, 1),
+        shared_mem_bytes: 0,
+    }
+}
+
+/// `LaunchConfig` for `fft_c2c_4096`: one block per batch lane, 512 threads.
+pub fn spec4096_launch_cfg() -> LaunchConfig {
+    LaunchConfig {
+        grid_dim: (BATCH as u32, 1, 1),
+        block_dim: (512, 1, 1),
         shared_mem_bytes: 0,
     }
 }

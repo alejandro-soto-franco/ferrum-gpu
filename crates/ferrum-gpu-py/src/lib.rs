@@ -19,7 +19,7 @@ use anyhow::{Result, anyhow};
 use cuda_core::embedded::{ArtifactPayloadKind, artifact_bundles_from_binary_path};
 use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
 
-use ferrum_gpu_fft::Plan;
+use ferrum_gpu_fft::{KernelKind, Plan};
 
 use numpy::{
     IntoPyArray, PyArray1, PyArray2, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2,
@@ -110,8 +110,12 @@ fn run_fft_flat_with_device(
         }
     }
 
-    let mut twiddles_flat: Vec<f32> = Vec::with_capacity((n - 1) * 2);
-    for c in plan.twiddles() {
+    // Twiddles match the plan's specialised kernel (radix-8 for N=4096,
+    // radix-2 otherwise). Inverse uses the host conjugate trick, so the
+    // forward-only kernel choice depends only on log_n.
+    let kernel_tw = plan.kernel_twiddles();
+    let mut twiddles_flat: Vec<f32> = Vec::with_capacity(kernel_tw.len() * 2);
+    for c in &kernel_tw {
         twiddles_flat.push(c.re);
         twiddles_flat.push(c.im);
     }
@@ -120,20 +124,32 @@ fn run_fft_flat_with_device(
     let dbuf_tw = DeviceBuffer::from_host(&stream, &twiddles_flat)?;
     let mut dbuf_out = DeviceBuffer::<f32>::zeroed(&stream, total * 2)?;
 
-    let block_threads = core::cmp::min(n / 2, 1024) as u32;
-    let cfg = LaunchConfig {
-        grid_dim: (batch as u32, 1, 1),
-        block_dim: (block_threads, 1, 1),
-        shared_mem_bytes: 0,
-    };
-    module.fft_radix2_c2c_pow2_1d_fallback(
-        stream.as_ref(),
-        cfg,
-        &dbuf_in,
-        &dbuf_tw,
-        &mut dbuf_out,
-        log_n,
-    )?;
+    match plan.kernel_kind {
+        KernelKind::Specialised4096 => {
+            let cfg = LaunchConfig {
+                grid_dim: (batch as u32, 1, 1),
+                block_dim: (512, 1, 1),
+                shared_mem_bytes: 0,
+            };
+            module.fft_c2c_4096(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+        }
+        _ => {
+            let block_threads = core::cmp::min(n / 2, 1024) as u32;
+            let cfg = LaunchConfig {
+                grid_dim: (batch as u32, 1, 1),
+                block_dim: (block_threads, 1, 1),
+                shared_mem_bytes: 0,
+            };
+            module.fft_radix2_c2c_pow2_1d_fallback(
+                stream.as_ref(),
+                cfg,
+                &dbuf_in,
+                &dbuf_tw,
+                &mut dbuf_out,
+                log_n,
+            )?;
+        }
+    }
 
     let mut host_out_flat = dbuf_out.to_host_vec(&stream)?;
 

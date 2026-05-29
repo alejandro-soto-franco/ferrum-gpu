@@ -18,7 +18,7 @@
 
 use anyhow::{Result, anyhow};
 use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
-use ferrum_gpu_fft::{Complex32, Direction, Plan};
+use ferrum_gpu_fft::{Complex32, Direction, KernelKind, Plan};
 
 include!("../../../crates/ferrum-gpu-fft-kernels/src/kernels_body.rs");
 
@@ -42,18 +42,24 @@ struct Case {
     batch: usize,
     dir: Direction,
     normalize: bool,
+    /// Relative-error gate. The radix-2 GPU kernels share the radix-2 CPU
+    /// reference's summation order so they match to ~1e-4; the N=4096 radix-8
+    /// kernel uses a different order and diverges at the fp32 4th digit, so its
+    /// gate is looser (the algorithm is proven exact-to-1e-3 on CPU by
+    /// `cpu_radix8::tests::radix8_matches_radix2_reference`).
+    rel_tol: f32,
     label: &'static str,
 }
 
 const CASES: &[Case] = &[
-    Case { log_n: 2,  batch: 1, dir: Direction::Forward, normalize: false, label: "N=4 fwd" },
-    Case { log_n: 3,  batch: 1, dir: Direction::Forward, normalize: false, label: "N=8 fwd" },
-    Case { log_n: 6,  batch: 1, dir: Direction::Forward, normalize: false, label: "N=64 fwd" },
-    Case { log_n: 8,  batch: 1, dir: Direction::Forward, normalize: false, label: "N=256 fwd" },
-    Case { log_n: 10, batch: 1, dir: Direction::Forward, normalize: false, label: "N=1024 fwd" },
-    Case { log_n: 12, batch: 1, dir: Direction::Forward, normalize: false, label: "N=4096 fwd" },
-    Case { log_n: 8,  batch: 8, dir: Direction::Forward, normalize: false, label: "N=256 fwd batch=8" },
-    Case { log_n: 8,  batch: 1, dir: Direction::Inverse, normalize: true,  label: "N=256 inv normalize" },
+    Case { log_n: 2,  batch: 1, dir: Direction::Forward, normalize: false, rel_tol: 1e-4, label: "N=4 fwd" },
+    Case { log_n: 3,  batch: 1, dir: Direction::Forward, normalize: false, rel_tol: 1e-4, label: "N=8 fwd" },
+    Case { log_n: 6,  batch: 1, dir: Direction::Forward, normalize: false, rel_tol: 1e-4, label: "N=64 fwd" },
+    Case { log_n: 8,  batch: 1, dir: Direction::Forward, normalize: false, rel_tol: 1e-4, label: "N=256 fwd" },
+    Case { log_n: 10, batch: 1, dir: Direction::Forward, normalize: false, rel_tol: 1e-4, label: "N=1024 fwd" },
+    Case { log_n: 12, batch: 1, dir: Direction::Forward, normalize: false, rel_tol: 5e-4, label: "N=4096 fwd" },
+    Case { log_n: 8,  batch: 8, dir: Direction::Forward, normalize: false, rel_tol: 1e-4, label: "N=256 fwd batch=8" },
+    Case { log_n: 8,  batch: 1, dir: Direction::Inverse, normalize: true,  rel_tol: 1e-4, label: "N=256 inv normalize" },
 ];
 
 fn run_case(
@@ -83,28 +89,43 @@ fn run_case(
 
     let stream = ctx.default_stream();
     let input_flat = flatten(&input_for_gpu);
-    let twiddles_flat = flatten(plan.twiddles());
+    // Twiddles match the plan's specialised kernel (radix-8 for N=4096,
+    // radix-2 otherwise). Inverse uses the conjugate trick on the host, so
+    // the forward-only kernel choice depends only on log_n.
+    let twiddles_flat = flatten(&plan.kernel_twiddles());
     let dbuf_in = DeviceBuffer::from_host(&stream, &input_flat)?;
     let dbuf_tw = DeviceBuffer::from_host(&stream, &twiddles_flat)?;
     let mut dbuf_out = DeviceBuffer::<f32>::zeroed(&stream, total * 2)?;
 
-    // CUDA caps block_dim at 1024 threads per block. For N <= 2048, one
-    // thread per butterfly. For N = 4096 (half_n = 2048), each thread does
-    // two butterflies via the kernel's strided loop.
-    let block_threads = core::cmp::min(n / 2, 1024) as u32;
-    let cfg = LaunchConfig {
-        grid_dim: (case.batch as u32, 1, 1),
-        block_dim: (block_threads, 1, 1),
-        shared_mem_bytes: 0,
-    };
-    module.fft_radix2_c2c_pow2_1d_fallback(
-        stream.as_ref(),
-        cfg,
-        &dbuf_in,
-        &dbuf_tw,
-        &mut dbuf_out,
-        case.log_n,
-    )?;
+    match plan.kernel_kind {
+        KernelKind::Specialised4096 => {
+            // One block per lane, 512 threads, 4 radix-8 Stockham stages.
+            let cfg = LaunchConfig {
+                grid_dim: (case.batch as u32, 1, 1),
+                block_dim: (512, 1, 1),
+                shared_mem_bytes: 0,
+            };
+            module.fft_c2c_4096(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+        }
+        _ => {
+            // CUDA caps block_dim at 1024 threads per block; one thread per
+            // butterfly (min(N/2, 1024)).
+            let block_threads = core::cmp::min(n / 2, 1024) as u32;
+            let cfg = LaunchConfig {
+                grid_dim: (case.batch as u32, 1, 1),
+                block_dim: (block_threads, 1, 1),
+                shared_mem_bytes: 0,
+            };
+            module.fft_radix2_c2c_pow2_1d_fallback(
+                stream.as_ref(),
+                cfg,
+                &dbuf_in,
+                &dbuf_tw,
+                &mut dbuf_out,
+                case.log_n,
+            )?;
+        }
+    }
 
     let mut host_out_flat = dbuf_out.to_host_vec(&stream)?;
 
@@ -130,7 +151,7 @@ fn run_case(
         let dre = (g.re - c.re).abs();
         let dim = (g.im - c.im).abs();
         let norm = c.re.abs() + c.im.abs() + 1.0;
-        if (dre + dim) / norm > 1e-4 {
+        if (dre + dim) / norm > case.rel_tol {
             return Err(anyhow!(
                 "{}: mismatch at {i}: gpu=({}, {}), cpu=({}, {}), |dre|+|dim|/norm={}",
                 case.label,
