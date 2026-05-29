@@ -269,6 +269,27 @@ a diagnostics change, not a codegen-quality fix. No upstream work on FMA /
 array-promotion / register allocation. So source-level workarounds (constant
 indexing, scalarisation) are the right lever; the pin stays at `6ed9938`.
 
+## Phase 4: fft_c2c_1024
+
+Tried 1024 = 32x32 four-step first (reuses the fast 32-pt warp FFT, 32 warps =
+32 sub-FFTs so no wave loop, 8 KiB shared). Correct (max_rel_err 3.08e-5).
+Perf under LOCKED clock (1500 MHz, fair head-to-head): four-step 1024 = 7.1x
+vs cuFFT, but the radix-2 **fallback 1024 = 6.34x** — so the four-step LOSES
+to the simple fallback (the earlier unlocked "4.96 < 5.88 win" was clock
+noise; locking the clock via the new sudo/zenity path settled it). Same
+verdict as the 4096 four-step: single-block-per-FFT four-step underperforms.
+
+Locked-clock baseline (perf-gate): fallback 256 = 6.34x, fallback 1024 =
+6.34x, radix-8 4096 = 3.78x. The radix-8 4096 (shared-memory Stockham,
+scalarized gather/scatter, inline dft8 macro, single buffer) is the best
+ferrum kernel and the pattern to replicate: its win over the fallback is the
+4 stages (fewer barriers) vs the fallback's 10-12 radix-2 stages.
+
+DECISION: ship Phase 4 as a radix-4 shared-memory Stockham kernel (1024 = 4^5,
+5 stages) mirroring the radix-8 structure, not the warp four-step. The 1024
+four-step is kept as a documented artifact (NOT wired); radix-4 is the
+production Specialised1024.
+
 ## Phase 0 summary
 
 Design adjustments for Phase 3+:
