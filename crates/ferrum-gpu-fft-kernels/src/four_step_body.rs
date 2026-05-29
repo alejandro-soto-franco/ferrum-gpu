@@ -84,7 +84,12 @@ mod four_step {
                     $e1r = dr * wr - di * wi;
                     $e1i = dr * wi + di * wr;
                 }
-                // Stages 1..5 (d = 16,8,4,2,1; cross-lane shuffle, both elements).
+                // Stages 1..5 (d = 16,8,4,2,1; cross-lane shuffle, both
+                // elements). Branchless: every lane runs identical
+                // instructions (arithmetic select, no warp divergence).
+                // Lower lane: e' = e + p. Upper lane: e' = (p - e) * W^exp.
+                // Unified: e' = (sign*e + p) * (twr, twi), with
+                // sign = +1/-1 and (twr,twi) = (1,0)/W selected by `upper`.
                 let mut s = 1u32;
                 while s < 6 {
                     let d = 32usize >> s;
@@ -92,24 +97,23 @@ mod four_step {
                     let p0i = warp.shfl_xor_f32($e0i, d as u32);
                     let p1r = warp.shfl_xor_f32($e1r, d as u32);
                     let p1i = warp.shfl_xor_f32($e1i, d as u32);
-                    if lane & d == 0 {
-                        $e0r = $e0r + p0r;
-                        $e0i = $e0i + p0i;
-                        $e1r = $e1r + p1r;
-                        $e1i = $e1i + p1i;
-                    } else {
-                        let exp = (lane & (d - 1)) * (1usize << s);
-                        let wr = w64[2 * exp];
-                        let wi = w64[2 * exp + 1];
-                        let d0r = p0r - $e0r;
-                        let d0i = p0i - $e0i;
-                        let d1r = p1r - $e1r;
-                        let d1i = p1i - $e1i;
-                        $e0r = d0r * wr - d0i * wi;
-                        $e0i = d0r * wi + d0i * wr;
-                        $e1r = d1r * wr - d1i * wi;
-                        $e1i = d1r * wi + d1i * wr;
-                    }
+
+                    let upper = lane & d != 0;
+                    let sign = if upper { -1.0f32 } else { 1.0f32 };
+                    let exp = (lane & (d - 1)) * (1usize << s);
+                    let tr = w64[2 * exp];
+                    let ti = w64[2 * exp + 1];
+                    let twr = if upper { tr } else { 1.0 };
+                    let twi = if upper { ti } else { 0.0 };
+
+                    let a0r = sign * $e0r + p0r;
+                    let a0i = sign * $e0i + p0i;
+                    let a1r = sign * $e1r + p1r;
+                    let a1i = sign * $e1i + p1i;
+                    $e0r = a0r * twr - a0i * twi;
+                    $e0i = a0r * twi + a0i * twr;
+                    $e1r = a1r * twr - a1i * twi;
+                    $e1i = a1r * twi + a1i * twr;
                     s += 1;
                 }
             }};

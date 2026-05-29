@@ -219,8 +219,11 @@ CPU-modelled first (`warp_fft::four_step_model`, verified == radix-2). On GPU:
 
 - Correct: max_rel_err 1.36e-4 vs radix-2 CPU reference.
 - Perf (ratio vs cuFFT, batch=256): 256 thr/block 10.2 -> +65-stride SMEM pad
-  9.97 -> 1024 thr/block (32 warps, 2 waves) 8.30. **Still worse than the
-  tuned shared-memory radix-8 kernel (3.80).**
+  9.97 -> 1024 thr/block (32 warps, 2 waves) 8.30 -> branchless butterfly
+  (no warp divergence) 8.01. **Still worse than the tuned shared-memory
+  radix-8 kernel (3.80).** Each lever (bank conflicts, block parallelism,
+  divergence) gave only a small gain -> none is the dominant cost; profiling
+  is required to find it.
 
 So the four-step as composed is a regression, not a win. The 32-pt spike was
 fast (19.7 Gpt/s) because of massive parallelism (65536 warps) and no
