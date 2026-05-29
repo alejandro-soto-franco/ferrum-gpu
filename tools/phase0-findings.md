@@ -304,6 +304,30 @@ Locked-clock scoreboard (ratio vs cuFFT): N=256 fallback 6.34, N=1024 radix-4
 pattern (256 = 4^4, 4 stages) — likely the best size yet given even smaller
 shared.
 
+## Phase 5: fft_c2c_256
+
+`fft_c2c_256` (radix-4, 256 = 4^4, 4 stages, 2 KiB shared, 64 threads) — same
+template as fft_c2c_1024. CPU side already covered by cpu_radix4/twiddles_radix4
+(verified log_n=8). GPU cross-check 1.22e-5; example 8/8; pytest 29/29. Wired
+via KernelKind::Specialised256.
+
+ALL THREE SIZES NOW SPECIALISED. Full perf-gate under LOCKED clock (1500 MHz),
+ratio vs cuFFT:
+
+| N    | kernel  | ratio | fallback was |
+| ---- | ------- | ----- | ------------ |
+| 256  | radix-4 | 1.32  | 6.34         |
+| 1024 | radix-4 | 2.13  | 6.34         |
+| 4096 | radix-8 | 3.69  | (n/a)        |
+
+Clear trend: smaller N -> closer to cuFFT (less shared, better occupancy,
+fewer stages). N=256 is at **1.32x** — within ~30% of cuFFT and the closest to
+the 0.9x gate. None passes 0.9x yet (that needs the multi-FFT-per-block /
+profiler-guided redesign tracked in the four-step notes), but every
+specialised size now beats its radix-2 fallback by 2-5x. The shared-memory
+radix-R Stockham family (scalarized, inline butterfly macro, single buffer) is
+the established winning pattern.
+
 ## Phase 0 summary
 
 Design adjustments for Phase 3+:

@@ -116,6 +116,15 @@ fn run_case(
             };
             module.fft_c2c_1024(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
         }
+        KernelKind::Specialised256 => {
+            // One block per lane, 64 threads, 4 radix-4 Stockham stages.
+            let cfg = LaunchConfig {
+                grid_dim: (case.batch as u32, 1, 1),
+                block_dim: (64, 1, 1),
+                shared_mem_bytes: 0,
+            };
+            module.fft_c2c_256(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+        }
         _ => {
             // CUDA caps block_dim at 1024 threads per block; one thread per
             // butterfly (min(N/2, 1024)).

@@ -216,3 +216,12 @@ pub fn spec1024_launch_cfg() -> LaunchConfig {
         shared_mem_bytes: 0,
     }
 }
+
+/// `LaunchConfig` for `fft_c2c_256`: one block per batch lane, 64 threads.
+pub fn spec256_launch_cfg() -> LaunchConfig {
+    LaunchConfig {
+        grid_dim: (BATCH as u32, 1, 1),
+        block_dim: (64, 1, 1),
+        shared_mem_bytes: 0,
+    }
+}

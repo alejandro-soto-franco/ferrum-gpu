@@ -77,7 +77,9 @@ impl Plan {
     pub fn kernel_twiddles(&self) -> Vec<Complex32> {
         match self.kernel_kind {
             KernelKind::Specialised4096 => twiddles::twiddles_radix8(self.log_n),
-            KernelKind::Specialised1024 => twiddles::twiddles_radix4(self.log_n),
+            KernelKind::Specialised1024 | KernelKind::Specialised256 => {
+                twiddles::twiddles_radix4(self.log_n)
+            }
             _ => self.twiddles_host.clone(),
         }
     }
