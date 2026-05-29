@@ -265,42 +265,77 @@ mod kernels {
             let j = b / m_r;
             let k = b - j * m_r;
 
-            // Phase 1: read 8 inputs (strided), apply input twiddles, radix-8
+            // Phase 1: read 8 strided inputs, apply input twiddles, radix-8
             // DFT, hold the 8 outputs in registers across the barrier.
+            //
+            // Fully unrolled into named scalars on purpose: cuda-oxide places
+            // any `[f32; N]` that is indexed by a runtime value in LOCAL (DRAM)
+            // memory, so the looped form spilled all 16 floats every butterfly.
+            // Constant-index scalars stay in registers. The twiddle factor for
+            // input p is `W_m^(p*k)` at table slot `stage_off + 8*k + p`.
             let src_base = j * m_r + k;
-            let mut x = [0.0f32; 16];
-            let mut p = 0usize;
-            while p < 8 {
-                let si = 2 * (src_base + p * NR);
-                let (re, im) = unsafe { (BUF[si], BUF[si + 1]) };
-                if p == 0 {
-                    x[0] = re;
-                    x[1] = im;
-                } else {
-                    let tw_i = 2 * (stage_off + 8 * k + p);
-                    let wr = twiddles[tw_i];
-                    let wi = twiddles[tw_i + 1];
-                    x[2 * p] = re * wr - im * wi;
-                    x[2 * p + 1] = re * wi + im * wr;
-                }
-                p += 1;
+            let tw_base = 2 * (stage_off + 8 * k);
+
+            // gather input p: scalar (re, im) at shared offset 2*(src_base+p*NR).
+            macro_rules! ld {
+                ($p:expr) => {{
+                    let si = 2 * (src_base + ($p) * NR);
+                    unsafe { (BUF[si], BUF[si + 1]) }
+                }};
             }
-            let out = dft8(x);
+            // twiddle-multiply input p by W_m^(p*k).
+            macro_rules! tw {
+                ($p:expr, $re:expr, $im:expr) => {{
+                    let wi_off = tw_base + 2 * ($p);
+                    let wr = twiddles[wi_off];
+                    let wi = twiddles[wi_off + 1];
+                    ($re * wr - $im * wi, $re * wi + $im * wr)
+                }};
+            }
+
+            let (g0r, g0i) = ld!(0);
+            let (r1, i1) = ld!(1);
+            let (r2, i2) = ld!(2);
+            let (r3, i3) = ld!(3);
+            let (r4, i4) = ld!(4);
+            let (r5, i5) = ld!(5);
+            let (r6, i6) = ld!(6);
+            let (r7, i7) = ld!(7);
+            let (t1r, t1i) = tw!(1, r1, i1);
+            let (t2r, t2i) = tw!(2, r2, i2);
+            let (t3r, t3i) = tw!(3, r3, i3);
+            let (t4r, t4i) = tw!(4, r4, i4);
+            let (t5r, t5i) = tw!(5, r5, i5);
+            let (t6r, t6i) = tw!(6, r6, i6);
+            let (t7r, t7i) = tw!(7, r7, i7);
+
+            let [o0, o1, o2, o3, o4, o5, o6, o7, o8, o9, o10, o11, o12, o13, o14, o15] = dft8([
+                g0r, g0i, t1r, t1i, t2r, t2i, t3r, t3i, t4r, t4i, t5r, t5i, t6r, t6i, t7r, t7i,
+            ]);
 
             // Every thread has finished reading; safe to overwrite BUF.
             thread::sync_threads();
 
-            // Phase 2: scatter the 8 outputs to their Stockham positions.
+            // Phase 2: scatter the 8 outputs to their Stockham positions
+            // (output q at dst_base + q*m_r). Unrolled for the same reason.
             let dst_base = j * m + k;
-            let mut q = 0usize;
-            while q < 8 {
-                let di = 2 * (dst_base + q * m_r);
-                unsafe {
-                    BUF[di] = out[2 * q];
-                    BUF[di + 1] = out[2 * q + 1];
-                }
-                q += 1;
+            macro_rules! st {
+                ($q:expr, $re:expr, $im:expr) => {{
+                    let di = 2 * (dst_base + ($q) * m_r);
+                    unsafe {
+                        BUF[di] = $re;
+                        BUF[di + 1] = $im;
+                    }
+                }};
             }
+            st!(0, o0, o1);
+            st!(1, o2, o3);
+            st!(2, o4, o5);
+            st!(3, o6, o7);
+            st!(4, o8, o9);
+            st!(5, o10, o11);
+            st!(6, o12, o13);
+            st!(7, o14, o15);
             thread::sync_threads();
 
             stage_off += 8 * m_r;

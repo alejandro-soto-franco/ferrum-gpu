@@ -114,15 +114,28 @@ controls for the asymmetric part. N=256/1024 stay on the radix-2 fallback
 | ---- | ------ | ---------------- | -------- | ----- | ----- |
 | 0 (baseline) | radix-8, dual 64KB ping-pong SMEM | 0.776 | 0.108 | 7.15 | n/a |
 | 1 | single 32KB SMEM buffer, register-resident butterflies (read->sync->write->sync) | 0.690 | 0.127 | 5.45 | keep (ferrum -11%; halves SMEM, lifts 1-block/SM cap) |
+| 2 | unroll 8-pt gather/scatter to named scalars (kill runtime array indexing) | 0.457 | 0.116 | 3.92 | keep (ferrum -34%; cumulative -41%) |
 
-Observation: the absolute ferrum time improved ~11%, but cuFFT's batched
-`vector_fft` is ~0.11-0.13 us/FFT (≈38 Gpt/s) vs our ~5-7 Gpt/s. The
-remaining ~5x gap is structural: one 4096-pt FFT per 512-thread block with
-8 block-wide barriers has far lower arithmetic intensity and parallelism
-than cuFFT's batched design. Closing 5x to clear the 0.9x gate through
-micro-opts of this kernel shape is not realistic; see spec Section 5.3
-(ship with a documented/relaxed gate) and the Task 3.5 step-5 escalation
-paths (hand-PTX fallback, upstream cuda-oxide issue).
+### PTX-quality probe (Task 3.5b) — cuda-oxide IS a major bottleneck
+
+Dumped the emitted PTX (repo-root `<binary>.ptx`, e.g. `kernel_cross_check.ptx`)
+and inspected the `fft_c2c_4096` entry.
+
+Baseline (iter 1) codegen pathologies:
+- **`[f32; 16]` arrays indexed by a runtime variable were placed in LOCAL
+  (DRAM) memory.** The kernel round-tripped all 16 floats every butterfly:
+  36 `st.local` + 18 `ld.local`. Iter-2 fix (unroll to constant-index named
+  scalars) cut this to 16 write-only `st.local` + **0 `ld.local`** — no spill
+  reloads in the hot path. This alone bought the 34% in iter 2.
+- **No FMA contraction.** `re*wr - im*wi` emits `mul.rn` + `sub.rn` instead of
+  `mul` + `fma`. Still 28 `mul.rn` + 7 `add.rn` + 7 `sub.rn`, 0 `fma` after
+  iter 2. Candidate for iter 3 (try `f32::mul_add`).
+
+Upstream check (requested): pinned `6ed9938`; `origin/main` is `396c76a`, only
+ONE commit ahead — *"catch device-codegen panics, emit our own diagnostic"*,
+a diagnostics change, not a codegen-quality fix. No upstream work on FMA /
+array-promotion / register allocation. So source-level workarounds (constant
+indexing, scalarisation) are the right lever; the pin stays at `6ed9938`.
 
 ## Phase 0 summary
 
