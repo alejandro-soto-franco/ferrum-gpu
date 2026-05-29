@@ -290,6 +290,20 @@ DECISION: ship Phase 4 as a radix-4 shared-memory Stockham kernel (1024 = 4^5,
 four-step is kept as a documented artifact (NOT wired); radix-4 is the
 production Specialised1024.
 
+RESULT: `fft_c2c_1024` (radix-4, single 8 KiB buffer, scalarized gather/
+scatter, inline dft4) under LOCKED clock = **2.15x** vs cuFFT, vs the fallback's
+6.34x and even better than the radix-8 4096 (3.74x) — the smaller transform's
+8 KiB shared gives much better occupancy than 4096's 32 KiB. CPU-verified
+(`cpu_radix4`, radix-2 ref, log_n 2..10), GPU cross-check 3.41e-5, example
+8/8, pytest 29/29. Wired into all consumers via `KernelKind::Specialised1024`
++ `Plan::kernel_twiddles` (twiddles_radix4). This is the best ferrum kernel
+and the closest to the 0.9x gate.
+
+Locked-clock scoreboard (ratio vs cuFFT): N=256 fallback 6.34, N=1024 radix-4
+**2.15**, N=4096 radix-8 3.74. Phase 5 (fft_c2c_256) should use the radix-4
+pattern (256 = 4^4, 4 stages) — likely the best size yet given even smaller
+shared.
+
 ## Phase 0 summary
 
 Design adjustments for Phase 3+:

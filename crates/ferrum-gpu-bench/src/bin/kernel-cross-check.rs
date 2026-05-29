@@ -103,11 +103,45 @@ fn check_specialised_4096(
     Ok(pass)
 }
 
+fn check_specialised_1024(
+    ctx: &std::sync::Arc<CudaContext>,
+    module: &kernels::LoadedModule,
+) -> Result<bool> {
+    let log_n = 10u32;
+    let n = 1usize << log_n;
+    let batch = 4usize;
+    let total = n * batch;
+
+    let plan = Plan::new(log_n, batch, false);
+    assert_eq!(plan.kernel_kind, KernelKind::Specialised1024);
+
+    let input = test_input(n, batch);
+    let mut cpu = input.clone();
+    plan.cpu_execute(&mut cpu, Direction::Forward);
+
+    let stream = ctx.default_stream();
+    let dbuf_in = DeviceBuffer::from_host(&stream, &flatten(&input))?;
+    let dbuf_tw = DeviceBuffer::from_host(&stream, &flatten(&plan.kernel_twiddles()))?;
+    let mut dbuf_out = DeviceBuffer::<f32>::zeroed(&stream, total * 2)?;
+    let cfg = LaunchConfig { grid_dim: (batch as u32, 1, 1), block_dim: (256, 1, 1), shared_mem_bytes: 0 };
+    module.fft_c2c_1024(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+    let gpu = dbuf_out.to_host_vec(&stream)?;
+
+    let (rel, idx) = max_rel_err(&gpu, &cpu);
+    let pass = rel <= REL_TOL;
+    println!(
+        "fft_c2c_1024 vs CPU (N={n}, batch={batch}): max_rel_err={rel:.2e} at bin {idx} -> {}",
+        if pass { "PASS" } else { "FAIL" }
+    );
+    Ok(pass)
+}
+
 fn main() -> Result<()> {
     let ctx = CudaContext::new(0).map_err(|e| anyhow!("CudaContext::new: {e}"))?;
     let module = kernels::load(&ctx)?;
 
     let mut all_pass = true;
+    all_pass &= check_specialised_1024(&ctx, &module)?;
     all_pass &= check_specialised_4096(&ctx, &module)?;
 
     if all_pass {

@@ -361,6 +361,133 @@ mod kernels {
         }
     }
 
+    /// 1D forward C2C FFT for N = 1024, batch arbitrary. One block per FFT,
+    /// 256 threads, 5 radix-4 Stockham stages, single 8 KiB shared buffer with
+    /// register-resident butterflies (read-all -> sync -> write-all -> sync).
+    ///
+    /// Same structure as `fft_c2c_4096` (radix 8); mirrors
+    /// `ferrum_gpu_fft::cpu_radix4::radix4_forward_lane`. `twiddles` is
+    /// `ferrum_gpu_fft::twiddles_radix4(10)` flattened.
+    ///
+    /// `grid_dim=(batch,1,1)`, `block_dim=(256,1,1)`, `shared_mem_bytes=0`.
+    #[kernel]
+    pub fn fft_c2c_1024(
+        in_data: &[f32],
+        twiddles: &[f32],
+        mut out_data: DisjointSlice<f32>,
+    ) {
+        static mut BUF: SharedArray<f32, 2048> = SharedArray::UNINIT; // 1024 complex
+
+        const N: usize = 1024;
+        const STAGES: usize = 5; // 4^5 = 1024
+        const THREADS: usize = 256;
+        const NR: usize = N / 4; // 256: lane stride between the 4 gathered inputs
+
+        let block = thread::blockIdx_x() as usize;
+        let tid = thread::threadIdx_x() as usize;
+        let lane_off = block * N * 2;
+
+        {
+            let mut t = tid;
+            while t < N {
+                unsafe {
+                    BUF[2 * t] = in_data[lane_off + 2 * t];
+                    BUF[2 * t + 1] = in_data[lane_off + 2 * t + 1];
+                }
+                t += THREADS;
+            }
+        }
+        thread::sync_threads();
+
+        // One radix-4 butterfly per thread (BUTTERFLIES == THREADS == 256).
+        let b = tid;
+        let mut m_r: usize = 1; // 4^(s-1)
+        let mut stage_off: usize = 0;
+        let mut stage = 0;
+        while stage < STAGES {
+            let m = m_r * 4; // 4^s
+            let j = b / m_r;
+            let k = b - j * m_r;
+            let src_base = j * m_r + k;
+            let tw_base = 2 * (stage_off + 4 * k);
+
+            // Gather 4 strided inputs, apply input twiddles W_m^(p*k) (p=1..3).
+            macro_rules! ld {
+                ($p:expr) => {{
+                    let si = 2 * (src_base + ($p) * NR);
+                    unsafe { (BUF[si], BUF[si + 1]) }
+                }};
+            }
+            macro_rules! tw {
+                ($p:expr, $re:expr, $im:expr) => {{
+                    let off = tw_base + 2 * ($p);
+                    let wr = twiddles[off];
+                    let wi = twiddles[off + 1];
+                    ($re * wr - $im * wi, $re * wi + $im * wr)
+                }};
+            }
+            let (g0r, g0i) = ld!(0);
+            let (r1, i1) = ld!(1);
+            let (r2, i2) = ld!(2);
+            let (r3, i3) = ld!(3);
+            let (t1r, t1i) = tw!(1, r1, i1);
+            let (t2r, t2i) = tw!(2, r2, i2);
+            let (t3r, t3i) = tw!(3, r3, i3);
+
+            // Radix-4 DFT (W_4 = -i folded), evaluating to (X0..X3) interleaved.
+            let ar = g0r + t2r;
+            let ai = g0i + t2i;
+            let bbr = g0r - t2r;
+            let bbi = g0i - t2i;
+            let cr = t1r + t3r;
+            let ci = t1i + t3i;
+            let dr = t1r - t3r;
+            let di = t1i - t3i;
+            let o0 = ar + cr;
+            let o1 = ai + ci;
+            let o2 = bbr + di; // X1 = b - i*d
+            let o3 = bbi - dr;
+            let o4 = ar - cr;
+            let o5 = ai - ci;
+            let o6 = bbr - di; // X3 = b + i*d
+            let o7 = bbi + dr;
+
+            thread::sync_threads();
+
+            let dst_base = j * m + k;
+            macro_rules! st {
+                ($q:expr, $re:expr, $im:expr) => {{
+                    let di = 2 * (dst_base + ($q) * m_r);
+                    unsafe {
+                        BUF[di] = $re;
+                        BUF[di + 1] = $im;
+                    }
+                }};
+            }
+            st!(0, o0, o1);
+            st!(1, o2, o3);
+            st!(2, o4, o5);
+            st!(3, o6, o7);
+            thread::sync_threads();
+
+            stage_off += 4 * m_r;
+            m_r = m;
+            stage += 1;
+        }
+
+        {
+            let mut t = tid;
+            while t < N {
+                let (re, im) = unsafe { (BUF[2 * t], BUF[2 * t + 1]) };
+                unsafe {
+                    *out_data.get_unchecked_mut(lane_off + 2 * t) = re;
+                    *out_data.get_unchecked_mut(lane_off + 2 * t + 1) = im;
+                }
+                t += THREADS;
+            }
+        }
+    }
+
     /// Tiled square transpose of a complex matrix laid out as interleaved
     /// f32 (re, im). Both `src` and `dst` are length `2*N*N` where
     /// `N = 1 << log_n`.

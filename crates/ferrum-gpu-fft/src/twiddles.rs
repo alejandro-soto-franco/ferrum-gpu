@@ -22,6 +22,37 @@ pub fn twiddles(log_n: u32) -> Vec<Complex32> {
     out
 }
 
+/// Input-twiddle table for a radix-4 Stockham auto-sort FFT of length
+/// `1 << log_n` (`log_n` must be a positive multiple of 2).
+///
+/// Layout, by ascending stage `s = 1..=log_n/2`: for `k in 0..m_r`, for
+/// `p in 0..4`: `W_m^((p*k) mod m)`, where `m = 4^s`, `m_r = 4^(s-1)`. Each
+/// stage block has length `4 * m_r`; the `p == 0` entries are `(1, 0)` so the
+/// kernel can index `stage_off + 4*k + p` branch-free. The radix-4 butterfly's
+/// internal `W_4` factors (just `±i`) are folded into the butterfly itself.
+pub fn twiddles_radix4(log_n: u32) -> Vec<Complex32> {
+    assert!(
+        log_n >= 2 && log_n % 2 == 0,
+        "twiddles_radix4 requires log_n a positive multiple of 2"
+    );
+    let stages = log_n / 2;
+    let mut out = Vec::new();
+    let mut m_r = 1usize; // 4^(s-1)
+    for _s in 1..=stages {
+        let m = m_r * 4; // 4^s
+        let scale = -2.0 * PI / m as f32;
+        for k in 0..m_r {
+            for p in 0..4usize {
+                let e = (p * k) % m;
+                let theta = scale * e as f32;
+                out.push(Complex32::new(theta.cos(), theta.sin()));
+            }
+        }
+        m_r = m;
+    }
+    out
+}
+
 /// Input-twiddle table for a radix-8 Stockham auto-sort FFT of length
 /// `1 << log_n` (`log_n` must be a positive multiple of 3).
 ///

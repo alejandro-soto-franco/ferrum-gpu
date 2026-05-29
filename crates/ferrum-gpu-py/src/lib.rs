@@ -133,6 +133,14 @@ fn run_fft_flat_with_device(
             };
             module.fft_c2c_4096(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
         }
+        KernelKind::Specialised1024 => {
+            let cfg = LaunchConfig {
+                grid_dim: (batch as u32, 1, 1),
+                block_dim: (256, 1, 1),
+                shared_mem_bytes: 0,
+            };
+            module.fft_c2c_1024(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+        }
         _ => {
             let block_threads = core::cmp::min(n / 2, 1024) as u32;
             let cfg = LaunchConfig {

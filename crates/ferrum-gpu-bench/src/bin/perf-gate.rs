@@ -9,7 +9,8 @@
 use anyhow::Result;
 
 use ferrum_gpu_bench::{
-    BATCH, alternating_bench, fallback_launch_cfg, init_cuda_contexts, spec4096_launch_cfg,
+    BATCH, alternating_bench, fallback_launch_cfg, init_cuda_contexts, spec1024_launch_cfg,
+    spec4096_launch_cfg,
 };
 use ferrum_gpu_fft::KernelKind;
 
@@ -36,6 +37,7 @@ fn main() -> Result<()> {
         let kind = KernelKind::for_forward_pow2(log_n);
         let fallback_cfg = fallback_launch_cfg(log_n);
         let spec4096_cfg = spec4096_launch_cfg();
+        let spec1024_cfg = spec1024_launch_cfg();
         let launch_ferrum = |dbuf_in: &cuda_core::DeviceBuffer<f32>,
                              dbuf_tw: &cuda_core::DeviceBuffer<f32>,
                              dbuf_out: &mut cuda_core::DeviceBuffer<f32>|
@@ -45,6 +47,15 @@ fn main() -> Result<()> {
                     module.fft_c2c_4096(
                         core_stream.as_ref(),
                         spec4096_cfg,
+                        dbuf_in,
+                        dbuf_tw,
+                        dbuf_out,
+                    )?;
+                }
+                KernelKind::Specialised1024 => {
+                    module.fft_c2c_1024(
+                        core_stream.as_ref(),
+                        spec1024_cfg,
                         dbuf_in,
                         dbuf_tw,
                         dbuf_out,
