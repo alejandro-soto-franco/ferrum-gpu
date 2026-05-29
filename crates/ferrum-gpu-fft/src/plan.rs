@@ -66,9 +66,19 @@ impl Plan {
         1usize << self.log_n
     }
 
-    /// Borrow the twiddle table.
+    /// Borrow the radix-2 stage twiddle table.
     pub fn twiddles(&self) -> &[Complex32] {
         &self.twiddles_host
+    }
+
+    /// Twiddle table for this plan's specialised kernel: the radix-8 input
+    /// table ([`twiddles::twiddles_radix8`]) for [`KernelKind::Specialised4096`],
+    /// otherwise the radix-2 stage table.
+    pub fn kernel_twiddles(&self) -> Vec<Complex32> {
+        match self.kernel_kind {
+            KernelKind::Specialised4096 => twiddles::twiddles_radix8(self.log_n),
+            _ => self.twiddles_host.clone(),
+        }
     }
 }
 
