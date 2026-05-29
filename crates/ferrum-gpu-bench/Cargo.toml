@@ -34,6 +34,10 @@ name = "warp-fft-spike"
 path = "src/bin/warp-fft-spike.rs"
 
 [[bin]]
+name = "four-step-spike"
+path = "src/bin/four-step-spike.rs"
+
+[[bin]]
 name = "cufft-ncu-trace"
 path = "src/bin/cufft-ncu-trace.rs"
 
