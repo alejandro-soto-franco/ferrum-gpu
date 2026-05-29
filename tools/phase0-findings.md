@@ -193,6 +193,29 @@ twiddles) are bounded above by the nvcc 3.45 ceiling, so they cannot reach
 0.9x either. Stop the perf loop here; correctness + the ~2x codegen recovery
 are the shipped wins.
 
+### Redesign spike: warp-shuffle FFT (the path to actually beat cuFFT)
+
+The 3.4x is algorithmic, so the redesign targets the algorithm: a four-step
+(64x64) FFT with warp-resident register sub-FFTs (shuffle butterflies) and a
+single shared-memory transpose, instead of 4 shared-memory round trips.
+
+Building block proven (`warp_fft32` kernel + `warp-fft-spike` bin, CPU model
+`ferrum_gpu_fft::warp_fft::warp_fft32_model`):
+- One warp computes a 32-pt C2C FFT entirely in registers, exchanging radix-2
+  DIF butterfly partners via `shfl_xor_f32` (cuda-device cooperative_groups),
+  zero shared memory. Output written to bit-reversed position.
+- Correctness: **max_rel_err 0.00e0** vs CPU model (bit-exact).
+- Throughput: **19.7 Gpt/s** (0.00163 us/FFT, 65536 FFTs), vs ~6 Gpt/s for the
+  shared-memory radix-8 4096 kernel and ~38 Gpt/s for cuFFT. ~3x the shared
+  approach, with no tuning and no four-step composition yet.
+
+Confirms: `shfl_xor_f32` lowers and runs correctly through cuda-oxide; the
+warp-register FFT is the right structure. Next: 64-pt warp FFT (2 elts/lane),
+then compose `fft_c2c_4096_4step` (64 column FFTs in registers -> twiddle ->
+one shared transpose -> 64 row FFTs), CPU-model-first as usual. FMA still
+caps us ~10-20% below nvcc (no `mul_add` lowering); an `asm!` `fma.rn.f32`
+helper for the inner butterfly is the eventual closer if needed.
+
 ### PTX-quality probe (Task 3.5b) — cuda-oxide IS a major bottleneck
 
 Dumped the emitted PTX (repo-root `<binary>.ptx`, e.g. `kernel_cross_check.ptx`)

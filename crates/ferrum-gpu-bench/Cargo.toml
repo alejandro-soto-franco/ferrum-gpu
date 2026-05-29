@@ -30,6 +30,10 @@ name = "kernel-cross-check"
 path = "src/bin/kernel-cross-check.rs"
 
 [[bin]]
+name = "warp-fft-spike"
+path = "src/bin/warp-fft-spike.rs"
+
+[[bin]]
 name = "cufft-ncu-trace"
 path = "src/bin/cufft-ncu-trace.rs"
 

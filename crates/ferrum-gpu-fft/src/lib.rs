@@ -16,6 +16,7 @@ pub mod cpu_2d;
 pub mod cpu_radix8;
 pub mod plan;
 pub mod twiddles;
+pub mod warp_fft;
 
 pub use complex::Complex32;
 pub use plan::{Direction, KernelKind, Plan, Plan2D};
