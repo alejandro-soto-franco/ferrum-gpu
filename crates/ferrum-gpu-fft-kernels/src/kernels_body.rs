@@ -208,9 +208,16 @@ mod kernels {
     }
 
     /// 1D forward C2C FFT for N = 4096, batch arbitrary. One block per FFT,
-    /// 512 threads, 4 radix-8 Stockham stages, ping-pong shared memory.
+    /// 512 threads, 4 radix-8 Stockham stages.
     ///
-    /// Direct port of `ferrum_gpu_fft::cpu_radix8::radix8_forward_lane`.
+    /// Same algorithm as `ferrum_gpu_fft::cpu_radix8::radix8_forward_lane`, but
+    /// register-resident across each stage so a SINGLE 32 KiB shared buffer
+    /// suffices instead of a 2x32 KiB ping-pong. Halving shared usage lifts the
+    /// 1-block-per-SM ceiling the dual-buffer version hit on sm_120. Each stage
+    /// is read-all-to-registers -> sync -> write-all-to-shared -> sync, which
+    /// keeps the single buffer race-free (every thread finishes reading before
+    /// any thread overwrites).
+    ///
     /// `in_data` / `out_data` are interleaved `[re, im, ...]` of length
     /// `2 * 4096 * batch`; `twiddles` is `ferrum_gpu_fft::twiddles_radix8(12)`
     /// flattened (the per-stage `[k][p]` input-twiddle table).
@@ -223,107 +230,89 @@ mod kernels {
         twiddles: &[f32],
         mut out_data: DisjointSlice<f32>,
     ) {
-        static mut PING: SharedArray<f32, 8192> = SharedArray::UNINIT;
-        static mut PONG: SharedArray<f32, 8192> = SharedArray::UNINIT;
+        static mut BUF: SharedArray<f32, 8192> = SharedArray::UNINIT;
 
         const N: usize = 4096;
         const STAGES: usize = 4; // 8^4 = 4096
         const THREADS: usize = 512;
         const NR: usize = N / 8; // 512: lane stride between the 8 gathered inputs
-        const BUTTERFLIES: usize = N / 8; // 512: one radix-8 butterfly per thread
+        // BUTTERFLIES == THREADS == 512: exactly one radix-8 butterfly / thread.
 
         let block = thread::blockIdx_x() as usize;
         let tid = thread::threadIdx_x() as usize;
         let lane_off = block * N * 2;
 
-        // Load this lane into PING.
+        // Load this lane into BUF.
         {
             let mut t = tid;
             while t < N {
                 unsafe {
-                    PING[2 * t] = in_data[lane_off + 2 * t];
-                    PING[2 * t + 1] = in_data[lane_off + 2 * t + 1];
+                    BUF[2 * t] = in_data[lane_off + 2 * t];
+                    BUF[2 * t + 1] = in_data[lane_off + 2 * t + 1];
                 }
                 t += THREADS;
             }
         }
         thread::sync_threads();
 
-        let mut src_is_ping = true;
+        // One butterfly per thread (BUTTERFLIES == THREADS == 512).
+        let b = tid;
         let mut m_r: usize = 1; // 8^(s-1)
         let mut stage_off: usize = 0;
         let mut stage = 0;
         while stage < STAGES {
             let m = m_r * 8; // 8^s
+            let j = b / m_r;
+            let k = b - j * m_r;
 
-            let mut b = tid;
-            while b < BUTTERFLIES {
-                let j = b / m_r;
-                let k = b - j * m_r;
-                let src_base = j * m_r + k;
-
-                let mut x = [0.0f32; 16];
-                let mut p = 0usize;
-                while p < 8 {
-                    let si = 2 * (src_base + p * NR);
-                    let (re, im) = unsafe {
-                        if src_is_ping {
-                            (PING[si], PING[si + 1])
-                        } else {
-                            (PONG[si], PONG[si + 1])
-                        }
-                    };
-                    if p == 0 {
-                        x[0] = re;
-                        x[1] = im;
-                    } else {
-                        let tw_i = 2 * (stage_off + 8 * k + p);
-                        let wr = twiddles[tw_i];
-                        let wi = twiddles[tw_i + 1];
-                        x[2 * p] = re * wr - im * wi;
-                        x[2 * p + 1] = re * wi + im * wr;
-                    }
-                    p += 1;
+            // Phase 1: read 8 inputs (strided), apply input twiddles, radix-8
+            // DFT, hold the 8 outputs in registers across the barrier.
+            let src_base = j * m_r + k;
+            let mut x = [0.0f32; 16];
+            let mut p = 0usize;
+            while p < 8 {
+                let si = 2 * (src_base + p * NR);
+                let (re, im) = unsafe { (BUF[si], BUF[si + 1]) };
+                if p == 0 {
+                    x[0] = re;
+                    x[1] = im;
+                } else {
+                    let tw_i = 2 * (stage_off + 8 * k + p);
+                    let wr = twiddles[tw_i];
+                    let wi = twiddles[tw_i + 1];
+                    x[2 * p] = re * wr - im * wi;
+                    x[2 * p + 1] = re * wi + im * wr;
                 }
+                p += 1;
+            }
+            let out = dft8(x);
 
-                let x = dft8(x);
+            // Every thread has finished reading; safe to overwrite BUF.
+            thread::sync_threads();
 
-                let dst_base = j * m + k;
-                let mut q = 0usize;
-                while q < 8 {
-                    let di = 2 * (dst_base + q * m_r);
-                    unsafe {
-                        if src_is_ping {
-                            PONG[di] = x[2 * q];
-                            PONG[di + 1] = x[2 * q + 1];
-                        } else {
-                            PING[di] = x[2 * q];
-                            PING[di + 1] = x[2 * q + 1];
-                        }
-                    }
-                    q += 1;
+            // Phase 2: scatter the 8 outputs to their Stockham positions.
+            let dst_base = j * m + k;
+            let mut q = 0usize;
+            while q < 8 {
+                let di = 2 * (dst_base + q * m_r);
+                unsafe {
+                    BUF[di] = out[2 * q];
+                    BUF[di + 1] = out[2 * q + 1];
                 }
-                b += THREADS;
+                q += 1;
             }
             thread::sync_threads();
 
             stage_off += 8 * m_r;
             m_r = m;
-            src_is_ping = !src_is_ping;
             stage += 1;
         }
 
-        // After 4 (even) stages the result is back in PING; store it out.
+        // Store the result back to global.
         {
             let mut t = tid;
             while t < N {
-                let (re, im) = unsafe {
-                    if src_is_ping {
-                        (PING[2 * t], PING[2 * t + 1])
-                    } else {
-                        (PONG[2 * t], PONG[2 * t + 1])
-                    }
-                };
+                let (re, im) = unsafe { (BUF[2 * t], BUF[2 * t + 1]) };
                 unsafe {
                     *out_data.get_unchecked_mut(lane_off + 2 * t) = re;
                     *out_data.get_unchecked_mut(lane_off + 2 * t + 1) = im;

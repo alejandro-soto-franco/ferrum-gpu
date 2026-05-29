@@ -101,6 +101,29 @@ Follow-up for v0.3+ (out of scope for v0.2): file an upstream issue at
 build-script-based workaround that emits PTX to a known path each consumer
 loads via `cuda_core::CudaContext::load_module_from_image`.
 
+## fft_c2c_4096 iteration log (Phase 3 / Task 3.5)
+
+Gate target: `ferrum_event_us <= 0.9 * cufft_event_us` at N=4096, batch=256.
+Measured with `perf-gate` (alternating ferrum/cuFFT trials). Clock lock
+unavailable (needs root; `clocks.base.graphics` not a queryable field on
+driver 580.159.03), so numbers carry DVFS noise — the alternating design
+controls for the asymmetric part. N=256/1024 stay on the radix-2 fallback
+(specialised kernels are Phases 4-5) and are expected MISSes here.
+
+| Iter | Change | N=4096 ferrum_us | cufft_us | ratio | keep? |
+| ---- | ------ | ---------------- | -------- | ----- | ----- |
+| 0 (baseline) | radix-8, dual 64KB ping-pong SMEM | 0.776 | 0.108 | 7.15 | n/a |
+| 1 | single 32KB SMEM buffer, register-resident butterflies (read->sync->write->sync) | 0.690 | 0.127 | 5.45 | keep (ferrum -11%; halves SMEM, lifts 1-block/SM cap) |
+
+Observation: the absolute ferrum time improved ~11%, but cuFFT's batched
+`vector_fft` is ~0.11-0.13 us/FFT (≈38 Gpt/s) vs our ~5-7 Gpt/s. The
+remaining ~5x gap is structural: one 4096-pt FFT per 512-thread block with
+8 block-wide barriers has far lower arithmetic intensity and parallelism
+than cuFFT's batched design. Closing 5x to clear the 0.9x gate through
+micro-opts of this kernel shape is not realistic; see spec Section 5.3
+(ship with a documented/relaxed gate) and the Task 3.5 step-5 escalation
+paths (hand-PTX fallback, upstream cuda-oxide issue).
+
 ## Phase 0 summary
 
 Design adjustments for Phase 3+:
