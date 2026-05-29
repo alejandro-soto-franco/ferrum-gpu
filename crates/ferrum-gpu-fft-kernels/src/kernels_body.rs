@@ -138,6 +138,201 @@ mod kernels {
         }
     }
 
+    /// In-register 8-point forward DFT on interleaved `[re, im, ...]` input.
+    ///
+    /// Mirrors `ferrum_gpu_fft::cpu_radix8::dft8_inplace` (which is unit-tested
+    /// against a brute-force DFT and against the radix-2 reference). DIT
+    /// radix-2 flow graph with the `W_8` factors constant-folded;
+    /// `C = cos(pi/4) = sin(pi/4)`.
+    ///
+    /// Takes/returns the 16 floats by value: cuda-oxide's codegen does not yet
+    /// support assigning through a `&mut [f32; 16]` (a `Deref -> ConstantIndex`
+    /// projection), so the host-side in-place variant cannot be reused here.
+    #[inline(always)]
+    fn dft8(x: [f32; 16]) -> [f32; 16] {
+        const C: f32 = 0.70710678_f32;
+
+        let (x0r, x0i) = (x[0], x[1]);
+        let (x1r, x1i) = (x[2], x[3]);
+        let (x2r, x2i) = (x[4], x[5]);
+        let (x3r, x3i) = (x[6], x[7]);
+        let (x4r, x4i) = (x[8], x[9]);
+        let (x5r, x5i) = (x[10], x[11]);
+        let (x6r, x6i) = (x[12], x[13]);
+        let (x7r, x7i) = (x[14], x[15]);
+
+        // Even half: 4-point DFT of {x0, x2, x4, x6}.
+        let (a0r, a0i) = (x0r + x4r, x0i + x4i);
+        let (a1r, a1i) = (x0r - x4r, x0i - x4i);
+        let (b0r, b0i) = (x2r + x6r, x2i + x6i);
+        let (b1r, b1i) = (x2r - x6r, x2i - x6i);
+        let (e0r, e0i) = (a0r + b0r, a0i + b0i);
+        let (e2r, e2i) = (a0r - b0r, a0i - b0i);
+        let (e1r, e1i) = (a1r + b1i, a1i - b1r); // a1 - i*b1
+        let (e3r, e3i) = (a1r - b1i, a1i + b1r); // a1 + i*b1
+
+        // Odd half: 4-point DFT of {x1, x3, x5, x7}.
+        let (c0r, c0i) = (x1r + x5r, x1i + x5i);
+        let (c1r, c1i) = (x1r - x5r, x1i - x5i);
+        let (d0r, d0i) = (x3r + x7r, x3i + x7i);
+        let (d1r, d1i) = (x3r - x7r, x3i - x7i);
+        let (o0r, o0i) = (c0r + d0r, c0i + d0i);
+        let (o2r, o2i) = (c0r - d0r, c0i - d0i);
+        let (o1r, o1i) = (c1r + d1i, c1i - d1r); // c1 - i*d1
+        let (o3r, o3i) = (c1r - d1i, c1i + d1r); // c1 + i*d1
+
+        // X_q = E_q + W_8^q O_q, X_{q+4} = E_q - W_8^q O_q.
+        let (w0r, w0i) = (o0r, o0i); // W_8^0 = 1
+        let (w1r, w1i) = (C * (o1r + o1i), C * (o1i - o1r)); // W_8^1 = (C, -C)
+        let (w2r, w2i) = (o2i, -o2r); // W_8^2 = -i
+        let (w3r, w3i) = (C * (o3i - o3r), -C * (o3r + o3i)); // W_8^3 = (-C, -C)
+
+        [
+            e0r + w0r,
+            e0i + w0i,
+            e1r + w1r,
+            e1i + w1i,
+            e2r + w2r,
+            e2i + w2i,
+            e3r + w3r,
+            e3i + w3i,
+            e0r - w0r,
+            e0i - w0i,
+            e1r - w1r,
+            e1i - w1i,
+            e2r - w2r,
+            e2i - w2i,
+            e3r - w3r,
+            e3i - w3i,
+        ]
+    }
+
+    /// 1D forward C2C FFT for N = 4096, batch arbitrary. One block per FFT,
+    /// 512 threads, 4 radix-8 Stockham stages, ping-pong shared memory.
+    ///
+    /// Direct port of `ferrum_gpu_fft::cpu_radix8::radix8_forward_lane`.
+    /// `in_data` / `out_data` are interleaved `[re, im, ...]` of length
+    /// `2 * 4096 * batch`; `twiddles` is `ferrum_gpu_fft::twiddles_radix8(12)`
+    /// flattened (the per-stage `[k][p]` input-twiddle table).
+    ///
+    /// `grid_dim = (batch, 1, 1)`, `block_dim = (512, 1, 1)`,
+    /// `shared_mem_bytes = 0` (static `SharedArray`).
+    #[kernel]
+    pub fn fft_c2c_4096(
+        in_data: &[f32],
+        twiddles: &[f32],
+        mut out_data: DisjointSlice<f32>,
+    ) {
+        static mut PING: SharedArray<f32, 8192> = SharedArray::UNINIT;
+        static mut PONG: SharedArray<f32, 8192> = SharedArray::UNINIT;
+
+        const N: usize = 4096;
+        const STAGES: usize = 4; // 8^4 = 4096
+        const THREADS: usize = 512;
+        const NR: usize = N / 8; // 512: lane stride between the 8 gathered inputs
+        const BUTTERFLIES: usize = N / 8; // 512: one radix-8 butterfly per thread
+
+        let block = thread::blockIdx_x() as usize;
+        let tid = thread::threadIdx_x() as usize;
+        let lane_off = block * N * 2;
+
+        // Load this lane into PING.
+        {
+            let mut t = tid;
+            while t < N {
+                unsafe {
+                    PING[2 * t] = in_data[lane_off + 2 * t];
+                    PING[2 * t + 1] = in_data[lane_off + 2 * t + 1];
+                }
+                t += THREADS;
+            }
+        }
+        thread::sync_threads();
+
+        let mut src_is_ping = true;
+        let mut m_r: usize = 1; // 8^(s-1)
+        let mut stage_off: usize = 0;
+        let mut stage = 0;
+        while stage < STAGES {
+            let m = m_r * 8; // 8^s
+
+            let mut b = tid;
+            while b < BUTTERFLIES {
+                let j = b / m_r;
+                let k = b - j * m_r;
+                let src_base = j * m_r + k;
+
+                let mut x = [0.0f32; 16];
+                let mut p = 0usize;
+                while p < 8 {
+                    let si = 2 * (src_base + p * NR);
+                    let (re, im) = unsafe {
+                        if src_is_ping {
+                            (PING[si], PING[si + 1])
+                        } else {
+                            (PONG[si], PONG[si + 1])
+                        }
+                    };
+                    if p == 0 {
+                        x[0] = re;
+                        x[1] = im;
+                    } else {
+                        let tw_i = 2 * (stage_off + 8 * k + p);
+                        let wr = twiddles[tw_i];
+                        let wi = twiddles[tw_i + 1];
+                        x[2 * p] = re * wr - im * wi;
+                        x[2 * p + 1] = re * wi + im * wr;
+                    }
+                    p += 1;
+                }
+
+                let x = dft8(x);
+
+                let dst_base = j * m + k;
+                let mut q = 0usize;
+                while q < 8 {
+                    let di = 2 * (dst_base + q * m_r);
+                    unsafe {
+                        if src_is_ping {
+                            PONG[di] = x[2 * q];
+                            PONG[di + 1] = x[2 * q + 1];
+                        } else {
+                            PING[di] = x[2 * q];
+                            PING[di + 1] = x[2 * q + 1];
+                        }
+                    }
+                    q += 1;
+                }
+                b += THREADS;
+            }
+            thread::sync_threads();
+
+            stage_off += 8 * m_r;
+            m_r = m;
+            src_is_ping = !src_is_ping;
+            stage += 1;
+        }
+
+        // After 4 (even) stages the result is back in PING; store it out.
+        {
+            let mut t = tid;
+            while t < N {
+                let (re, im) = unsafe {
+                    if src_is_ping {
+                        (PING[2 * t], PING[2 * t + 1])
+                    } else {
+                        (PONG[2 * t], PONG[2 * t + 1])
+                    }
+                };
+                unsafe {
+                    *out_data.get_unchecked_mut(lane_off + 2 * t) = re;
+                    *out_data.get_unchecked_mut(lane_off + 2 * t + 1) = im;
+                }
+                t += THREADS;
+            }
+        }
+    }
+
     /// Tiled square transpose of a complex matrix laid out as interleaved
     /// f32 (re, im). Both `src` and `dst` are length `2*N*N` where
     /// `N = 1 << log_n`.
