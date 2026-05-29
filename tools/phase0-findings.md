@@ -136,6 +136,29 @@ hypothesis is confirmed and largely mitigated at source level). Remaining
 occupancy). Closing it needs the "bridge": hand-PTX or nvcc-compiled PTX for
 this kernel loaded via cuda-core, OR upstream codegen FMA/optimisation support.
 
+### Task 3.5c: nvcc ceiling experiment — BLOCKED by toolchain
+
+Wrote `tools/radix8_ceiling.cu` (identical radix-8 algorithm in CUDA-C, to
+compile with nvcc -O3 and time vs cuFFT) to decide codegen-gap vs algorithmic-
+gap. It does not compile on this box:
+
+- nvcc 13.1 + Fedora 43 glibc clash: `bits/mathcalls.h` declares
+  `rsqrt`/`rsqrtf` `noexcept(true)`, CUDA's `crt/math_functions.h` declares
+  them without -> "exception specification is incompatible" (a hard EDG error,
+  no suppressible number; independent of `-std`, `-ccbin gcc/clang`).
+- clang 21 `-x cuda` can't use CUDA 13's headers (`texture_fetch_functions.h`
+  removed in 13).
+- Device-only `nvcc -ptx` clears it for a trivial kernel but the real kernel
+  (`__shared__` etc.) pulls the conflicting headers again.
+
+Implication: nvcc cannot build CUDA on this host without patching system CUDA
+headers, so a *nvcc-compiled-PTX* bridge cannot be produced here either.
+cuda-oxide works only because it bypasses nvcc/cudafe with its own LLVM +
+libdevice pipeline. Bridge paths that remain: (a) fix the toolchain (patch
+`crt/math_functions.h` to add `noexcept`, or install a CUDA-supported gcc),
+then nvcc-bridge; (b) hand-author PTX for fft_c2c_4096 (large); (c) accept
+~3.8x and ship with a documented/relaxed gate per spec 5.3.
+
 ### PTX-quality probe (Task 3.5b) — cuda-oxide IS a major bottleneck
 
 Dumped the emitted PTX (repo-root `<binary>.ptx`, e.g. `kernel_cross_check.ptx`)
