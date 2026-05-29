@@ -138,75 +138,6 @@ mod kernels {
         }
     }
 
-    /// In-register 8-point forward DFT on interleaved `[re, im, ...]` input.
-    ///
-    /// Mirrors `ferrum_gpu_fft::cpu_radix8::dft8_inplace` (which is unit-tested
-    /// against a brute-force DFT and against the radix-2 reference). DIT
-    /// radix-2 flow graph with the `W_8` factors constant-folded;
-    /// `C = cos(pi/4) = sin(pi/4)`.
-    ///
-    /// Takes/returns the 16 floats by value: cuda-oxide's codegen does not yet
-    /// support assigning through a `&mut [f32; 16]` (a `Deref -> ConstantIndex`
-    /// projection), so the host-side in-place variant cannot be reused here.
-    #[inline(always)]
-    fn dft8(x: [f32; 16]) -> [f32; 16] {
-        const C: f32 = 0.70710678_f32;
-
-        let (x0r, x0i) = (x[0], x[1]);
-        let (x1r, x1i) = (x[2], x[3]);
-        let (x2r, x2i) = (x[4], x[5]);
-        let (x3r, x3i) = (x[6], x[7]);
-        let (x4r, x4i) = (x[8], x[9]);
-        let (x5r, x5i) = (x[10], x[11]);
-        let (x6r, x6i) = (x[12], x[13]);
-        let (x7r, x7i) = (x[14], x[15]);
-
-        // Even half: 4-point DFT of {x0, x2, x4, x6}.
-        let (a0r, a0i) = (x0r + x4r, x0i + x4i);
-        let (a1r, a1i) = (x0r - x4r, x0i - x4i);
-        let (b0r, b0i) = (x2r + x6r, x2i + x6i);
-        let (b1r, b1i) = (x2r - x6r, x2i - x6i);
-        let (e0r, e0i) = (a0r + b0r, a0i + b0i);
-        let (e2r, e2i) = (a0r - b0r, a0i - b0i);
-        let (e1r, e1i) = (a1r + b1i, a1i - b1r); // a1 - i*b1
-        let (e3r, e3i) = (a1r - b1i, a1i + b1r); // a1 + i*b1
-
-        // Odd half: 4-point DFT of {x1, x3, x5, x7}.
-        let (c0r, c0i) = (x1r + x5r, x1i + x5i);
-        let (c1r, c1i) = (x1r - x5r, x1i - x5i);
-        let (d0r, d0i) = (x3r + x7r, x3i + x7i);
-        let (d1r, d1i) = (x3r - x7r, x3i - x7i);
-        let (o0r, o0i) = (c0r + d0r, c0i + d0i);
-        let (o2r, o2i) = (c0r - d0r, c0i - d0i);
-        let (o1r, o1i) = (c1r + d1i, c1i - d1r); // c1 - i*d1
-        let (o3r, o3i) = (c1r - d1i, c1i + d1r); // c1 + i*d1
-
-        // X_q = E_q + W_8^q O_q, X_{q+4} = E_q - W_8^q O_q.
-        let (w0r, w0i) = (o0r, o0i); // W_8^0 = 1
-        let (w1r, w1i) = (C * (o1r + o1i), C * (o1i - o1r)); // W_8^1 = (C, -C)
-        let (w2r, w2i) = (o2i, -o2r); // W_8^2 = -i
-        let (w3r, w3i) = (C * (o3i - o3r), -C * (o3r + o3i)); // W_8^3 = (-C, -C)
-
-        [
-            e0r + w0r,
-            e0i + w0i,
-            e1r + w1r,
-            e1i + w1i,
-            e2r + w2r,
-            e2i + w2i,
-            e3r + w3r,
-            e3i + w3i,
-            e0r - w0r,
-            e0i - w0i,
-            e1r - w1r,
-            e1i - w1i,
-            e2r - w2r,
-            e2i - w2i,
-            e3r - w3r,
-            e3i - w3i,
-        ]
-    }
-
     /// 1D forward C2C FFT for N = 4096, batch arbitrary. One block per FFT,
     /// 512 threads, 4 radix-8 Stockham stages.
     ///
@@ -284,12 +215,85 @@ mod kernels {
                 }};
             }
             // twiddle-multiply input p by W_m^(p*k).
+            //
+            // NOTE: the ideal form is FMA (`re.mul_add(wr, -(im*wi))`), but
+            // `f32::mul_add` lowers to `llvm.fma.f32`, which this cuda-oxide
+            // codegen does not recognise (it only special-cases `cuda_device`
+            // intrinsics) and leaves as an unresolved extern -> nvJitLink
+            // failure. cuda-oxide also will not contract `mul`+`sub` into an
+            // FMA on its own, so the butterfly stays at 4 mul + 2 add/sub here.
+            // Reachable only via upstream codegen support; tracked in findings.
             macro_rules! tw {
                 ($p:expr, $re:expr, $im:expr) => {{
                     let wi_off = tw_base + 2 * ($p);
                     let wr = twiddles[wi_off];
                     let wi = twiddles[wi_off + 1];
                     ($re * wr - $im * wi, $re * wi + $im * wr)
+                }};
+            }
+
+            // In-register 8-point forward DFT, evaluating to a 16-tuple
+            // `(X0.re, X0.im, ..., X7.re, X7.im)`. A macro, not a function:
+            // cuda-oxide does not honour `#[inline(always)]` here and lowered a
+            // standalone `fn dft8([f32;16]) -> [f32;16]` to a real `.func` call
+            // with the arrays passed by pointer through local memory. Mirrors
+            // `ferrum_gpu_fft::cpu_radix8::dft8_inplace` (DIT radix-2 flow graph,
+            // `W_8` constant-folded; `C = cos(pi/4)`), which is unit-tested.
+            macro_rules! dft8 {
+                ($x0:expr, $x1:expr, $x2:expr, $x3:expr, $x4:expr, $x5:expr,
+                 $x6:expr, $x7:expr, $x8:expr, $x9:expr, $x10:expr, $x11:expr,
+                 $x12:expr, $x13:expr, $x14:expr, $x15:expr) => {{
+                    const C: f32 = 0.70710678_f32;
+                    let (x0r, x0i) = ($x0, $x1);
+                    let (x1r, x1i) = ($x2, $x3);
+                    let (x2r, x2i) = ($x4, $x5);
+                    let (x3r, x3i) = ($x6, $x7);
+                    let (x4r, x4i) = ($x8, $x9);
+                    let (x5r, x5i) = ($x10, $x11);
+                    let (x6r, x6i) = ($x12, $x13);
+                    let (x7r, x7i) = ($x14, $x15);
+
+                    // Even half: 4-point DFT of {x0, x2, x4, x6}.
+                    let (a0r, a0i) = (x0r + x4r, x0i + x4i);
+                    let (a1r, a1i) = (x0r - x4r, x0i - x4i);
+                    let (b0r, b0i) = (x2r + x6r, x2i + x6i);
+                    let (b1r, b1i) = (x2r - x6r, x2i - x6i);
+                    let (e0r, e0i) = (a0r + b0r, a0i + b0i);
+                    let (e2r, e2i) = (a0r - b0r, a0i - b0i);
+                    let (e1r, e1i) = (a1r + b1i, a1i - b1r); // a1 - i*b1
+                    let (e3r, e3i) = (a1r - b1i, a1i + b1r); // a1 + i*b1
+
+                    // Odd half: 4-point DFT of {x1, x3, x5, x7}.
+                    let (c0r, c0i) = (x1r + x5r, x1i + x5i);
+                    let (c1r, c1i) = (x1r - x5r, x1i - x5i);
+                    let (d0r, d0i) = (x3r + x7r, x3i + x7i);
+                    let (d1r, d1i) = (x3r - x7r, x3i - x7i);
+                    let (o0r, o0i) = (c0r + d0r, c0i + d0i);
+                    let (o2r, o2i) = (c0r - d0r, c0i - d0i);
+                    let (o1r, o1i) = (c1r + d1i, c1i - d1r); // c1 - i*d1
+                    let (o3r, o3i) = (c1r - d1i, c1i + d1r); // c1 + i*d1
+
+                    // X_q = E_q + W_8^q O_q, X_{q+4} = E_q - W_8^q O_q.
+                    let (w1r, w1i) = (C * (o1r + o1i), C * (o1i - o1r)); // W_8^1
+                    let (w3r, w3i) = (C * (o3i - o3r), -C * (o3r + o3i)); // W_8^3
+                    (
+                        e0r + o0r,
+                        e0i + o0i,
+                        e1r + w1r,
+                        e1i + w1i,
+                        e2r + o2i, // W_8^2 = -i: +(o2i, -o2r)
+                        e2i - o2r,
+                        e3r + w3r,
+                        e3i + w3i,
+                        e0r - o0r,
+                        e0i - o0i,
+                        e1r - w1r,
+                        e1i - w1i,
+                        e2r - o2i,
+                        e2i + o2r,
+                        e3r - w3r,
+                        e3i - w3i,
+                    )
                 }};
             }
 
@@ -309,9 +313,9 @@ mod kernels {
             let (t6r, t6i) = tw!(6, r6, i6);
             let (t7r, t7i) = tw!(7, r7, i7);
 
-            let [o0, o1, o2, o3, o4, o5, o6, o7, o8, o9, o10, o11, o12, o13, o14, o15] = dft8([
-                g0r, g0i, t1r, t1i, t2r, t2i, t3r, t3i, t4r, t4i, t5r, t5i, t6r, t6i, t7r, t7i,
-            ]);
+            let (o0, o1, o2, o3, o4, o5, o6, o7, o8, o9, o10, o11, o12, o13, o14, o15) = dft8!(
+                g0r, g0i, t1r, t1i, t2r, t2i, t3r, t3i, t4r, t4i, t5r, t5i, t6r, t6i, t7r, t7i
+            );
 
             // Every thread has finished reading; safe to overwrite BUF.
             thread::sync_threads();

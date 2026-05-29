@@ -115,6 +115,26 @@ controls for the asymmetric part. N=256/1024 stay on the radix-2 fallback
 | 0 (baseline) | radix-8, dual 64KB ping-pong SMEM | 0.776 | 0.108 | 7.15 | n/a |
 | 1 | single 32KB SMEM buffer, register-resident butterflies (read->sync->write->sync) | 0.690 | 0.127 | 5.45 | keep (ferrum -11%; halves SMEM, lifts 1-block/SM cap) |
 | 2 | unroll 8-pt gather/scatter to named scalars (kill runtime array indexing) | 0.457 | 0.116 | 3.92 | keep (ferrum -34%; cumulative -41%) |
+| 3 | inline dft8 as a tuple macro (was a non-inlined `.func` w/ by-ptr [f32;16]) | 0.292 | 0.077 | 3.80 | keep (st.local 16->0, all spills gone; ratio -3%, abs -36% is mostly clock boost) |
+
+The ratio is the clock-invariant metric (no clock lock available); absolute
+us swing with DVFS. Ratio history 7.15 -> 5.45 -> 3.92 -> 3.80. The big wins
+were the SMEM-halving (iter 1) and spill-elimination (iter 2); iter 3's
+remaining spills were off the critical path so it bought little ratio, but the
+kernel now has ZERO local-memory traffic and dft8 fully inlined.
+
+Failed attempt (not kept): `f32::mul_add` to force `fma.rn.f32`. cuda-oxide's
+codegen does not lower `llvm.fma.f32` (only its own `cuda_device` intrinsics),
+leaving an unresolved extern -> `nvJitLink error 4`. FMA contraction is
+therefore unreachable from Rust source on this backend; ~10-20% left on the
+table. Tracked as an upstream codegen gap alongside the no-auto-FMA and
+array-in-local-memory issues.
+
+Status: codegen-level spill recovery is done (the cuda-oxide-is-bad-at-PTX
+hypothesis is confirmed and largely mitigated at source level). Remaining
+~3.8x is FMA (codegen-blocked) + structural (1 FFT/block, 3 barriers/run,
+occupancy). Closing it needs the "bridge": hand-PTX or nvcc-compiled PTX for
+this kernel loaded via cuda-core, OR upstream codegen FMA/optimisation support.
 
 ### PTX-quality probe (Task 3.5b) — cuda-oxide IS a major bottleneck
 
