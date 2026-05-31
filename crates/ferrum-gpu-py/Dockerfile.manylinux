@@ -10,9 +10,12 @@
 # Notes:
 # - The image is ~6-8 GB. Build time ~15-25 minutes from scratch.
 # - GPU at build time is NOT required. The build-wheel.sh script sets
-#   CUDA_OXIDE_TARGET=compute_70 so cuda-oxide emits virtual PTX that the
-#   runtime driver JITs to native SASS on whatever GPU the wheel-installer
-#   has. Add `--gpus all` only if you want to run `cargo oxide doctor`
+#   CUDA_OXIDE_TARGET=sm_80 so cuda-oxide emits PTX (ISA 7.0) that the runtime
+#   driver JITs to native SASS on any Ampere-or-newer GPU. Do NOT use a
+#   compute_* target: cuda-oxide emits a stale `.version 3.2` directive for
+#   compute_* targets, which ptxas rejects ("PTX .version 3.2 does not support
+#   .target ...") and the wheel fails its first FFT with DriverError 218.
+#   Add `--gpus all` only if you want to run `cargo oxide doctor`
 #   inside the container interactively.
 # - Output wheel lands in /work/dist/ tagged manylinux_2_28_x86_64. Verify
 #   with `auditwheel show dist/*.whl`.
@@ -36,6 +39,13 @@ RUN dnf -y install dnf-plugins-core && \
 ENV PATH="/usr/local/cuda/bin:${PATH}" \
     LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}" \
     CUDA_HOME=/usr/local/cuda
+
+# libclang for bindgen (cuda-oxide's cargo-oxide build depends on it via
+# bindgen; without it `cargo install cargo-oxide` panics: "Unable to find
+# libclang"). clang-devel ships libclang.so on the manylinux_2_28 (AlmaLinux 8)
+# base.
+RUN dnf -y install clang clang-devel llvm-devel && dnf clean all
+ENV LIBCLANG_PATH=/usr/lib64
 
 # Install Rust nightly-2026-04-03 + components.
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \

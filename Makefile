@@ -64,7 +64,10 @@ wheel:
 wheel-manylinux:
 	docker build -f crates/ferrum-gpu-py/Dockerfile.manylinux \
 	    -t ferrum-gpu-builder:latest crates/ferrum-gpu-py
-	docker run --rm -v $(PWD):/work -w /work \
+	# `:z` relabels the bind mount for SELinux (Fedora/RHEL enforce by
+	# default); without it the container gets "Permission denied" reading
+	# /work even for world-readable files.
+	docker run --rm -v $(PWD):/work:z -w /work \
 	    ferrum-gpu-builder:latest \
 	    /work/crates/ferrum-gpu-py/build-wheel.sh
 

@@ -37,6 +37,8 @@ The workspace ships:
 ## Runtime requirements (wheel users)
 
 - Linux x86_64 with glibc >= 2.34 (Ubuntu 22.04+, RHEL 9+, Fedora 36+, etc.)
+- NVIDIA GPU of compute capability >= 8.0 (Ampere or newer); the wheel ships
+  sm_80 PTX that the driver JITs forward to your architecture
 - NVIDIA driver supporting CUDA 13.x (driver 580+)
 - Python 3.10+
 
