@@ -130,6 +130,20 @@ therefore unreachable from Rust source on this backend; ~10-20% left on the
 table. Tracked as an upstream codegen gap alongside the no-auto-FMA and
 array-in-local-memory issues.
 
+> **CORRECTION (2026-06-02): the above is STALE — `f32::mul_add` works.** At the
+> pinned rev `6ed9938`, cuda-oxide lowers the Rust FMA intrinsics to libdevice:
+> `mir-lower/src/convert/ops/call.rs:271` maps `FmaF32 | FmuladdF32 ->
+> "__nv_fmaf"` (and `FmaF64 | FmuladdF64 -> "__nv_fma"`). Chain:
+> `f32::mul_add` -> `core::intrinsics::fmaf32` -> `__nv_fmaf`, which NVVM links +
+> inlines to a single `fma.rn.f32` (cuda-oxide compiles via NVVM/libdevice).
+> The original failure was almost certainly `__nv_fmaf` going unlinked in a
+> kernel that used no other libdevice function, not a missing lowering.
+> VERIFIED: a `mul_add` probe in the `vector-add-cuda-oxide` kernel compiled,
+> JIT-linked, and verified 1,048,576 elements (`a*2+b`) correctly. So FMA is
+> reachable in 100% pure compiler-lowered Rust (`re*wr - im*wi` ->
+> `re.mul_add(wr, -(im*wi))`); the ~10-20% is NOT codegen-blocked. The existing
+> 256/1024/4096 butterflies can take this win directly. No `asm!`, no fork.
+
 Status: codegen-level spill recovery is done (the cuda-oxide-is-bad-at-PTX
 hypothesis is confirmed and largely mitigated at source level). Remaining
 ~3.8x is FMA (codegen-blocked) + structural (1 FFT/block, 3 barriers/run,

@@ -19,9 +19,9 @@ Hard constraints (non-negotiable, all must still hold at ship):
 - **Correctness**: new kernel cross-checks against a CPU model AND the radix-2
   reference at `max_rel_err <= 1e-3`; `pytest` stays **29/29**; the
   `fft-1d-c2c` example stays **8/8**.
-- **Pure-Rust source**: the kernel's numerical body is Rust. FMA is obtained
-  via Rust `asm!("fma.rn.f32 ...")` for now (see §6), not CUDA C and not an
-  externally-linked PTX blob.
+- **Pure-Rust source**: the kernel's numerical body is Rust, fully
+  compiler-lowered. FMA is `f32::mul_add` (lowers to libdevice `__nv_fmaf` →
+  `fma.rn.f32`); no `asm!`, no CUDA C, no linked PTX blob (see §6).
 - **Reuse-ready**: the kernel is built from a `local_radixR! + warp32_shuffle!
   + twiddle` macro template structured so N=1024 (32×32) and N=4096 can adopt
   it in a fast-follow without redesign. (1024/4096 implementation is OUT of
@@ -97,11 +97,7 @@ New / changed, smallest-purpose units:
   `#[cuda_module]` block with `fft_c2c_256_warp`, plus the shared
   `warp_fft32!` / `dft8!` / `fma!` macros. Single source of truth, included by
   consumers per the existing `include!` contract.
-- `crates/ferrum-gpu-fft-kernels/src/fma_asm.rs` or inline (new): the device
-  `fma!` macro / `#[inline] fn fma(a,b,c)` wrapping `asm!("fma.rn.f32 ...")`,
-  with a `mul_add` fallback behind `cfg` (the post-upstream pure path, §6).
-- `crates/ferrum-gpu-bench/src/bin/fma-asm-spike.rs` (new, P0): minimal kernel
-  exercising `fma!`, host-verified — the go/no-go gate for the asm! lever.
+- FMA: no helper crate needed — butterflies use `f32::mul_add` directly (§6).
 - `crates/ferrum-gpu-bench/src/bin/fft256-warp-spike.rs` (new): GPU vs CPU-model
   + radix-2 cross-check and standalone timing for profiler runs.
 - `crates/ferrum-gpu-bench/src/lib.rs`: add `spec256_warp_launch_cfg()` (K
@@ -136,31 +132,38 @@ Per-iteration:
 Stop when ratio < 1.0 (success) or profiling shows a hard occupancy/IO wall that
 Approach B addresses better (fall back, §7).
 
-## 6. FMA: asm! now, upstream fork later
+## 6. FMA: `f32::mul_add` works today (RESOLVED — no asm!, no fork)
 
-cuda-oxide does not lower `llvm.fma.f32` (the `f32::mul_add` path) — it leaves
-an unresolved extern → `nvJitLink error 4`. Two paths to the instruction; this
-spec takes the first now and tracks the second:
+**Empirically settled 2026-06-02 (P0).** The `phase0-findings.md` claim that
+"cuda-oxide does not lower `llvm.fma.f32` → unresolved extern → nvJitLink error
+4" is **stale**. At the pinned rev `6ed9938`, cuda-oxide lowers the Rust FMA
+intrinsics to libdevice:
 
-- **NOW — `asm!("fma.rn.f32 %0,%1,%2,%3")`** in a device `fma!` helper. Still
-  pure-Rust *source* (no CUDA C, no linked PTX); the algorithm stays in Rust,
-  only this one instruction is hand-emitted. **P0 must prove cuda-oxide
-  forwards NVPTX inline `asm!` at all** — its codegen is documented to
-  special-case only `cuda_device` intrinsics, so raw `asm!` passthrough is
-  unverified. P0 is the go/no-go gate.
-- **LATER (tracked follow-up, not this spec)** — fork cuda-oxide and add the
-  `llvm.fma.f32`/`.f64` → `fma.rn.f32`/`.f64` lowering arm to its existing
-  intrinsic dispatch (checkout at `~/.cargo/git/checkouts/cuda-oxide-6d394bb007f5e114`,
-  pinned rev `6ed9938`). That makes `f32::mul_add` work → the kernel becomes
-  100% compiler-lowered pure Rust and the `asm!` is deleted. Benefits every
-  kernel; upstreamable as a contributor PR. The `fma!` helper keeps a
-  `cfg`-gated `mul_add` arm so the swap is a one-line flip once upstream lands.
+```rust
+// mir-lower/src/convert/ops/call.rs:271
+Self::FmaF32 | Self::FmuladdF32 => Ok("__nv_fmaf"),
+Self::FmaF64 | Self::FmuladdF64 => Ok("__nv_fma"),
+```
 
-If P0 shows `asm!` is NOT forwarded by cuda-oxide, the FMA lever is *forced*
-onto the fork path and this spec's P0 escalates to "do the cuda-oxide lowering
-first." The kernel work (P1–P2, written with the `fma!` helper) proceeds either
-way; FMA is a perf multiplier applied at tuning time (P3), not a correctness
-dependency.
+Chain: `f32::mul_add` → `core::intrinsics::fmaf32` → libdevice `__nv_fmaf`,
+which NVVM links + inlines to a single `fma.rn.f32` before ptxas (cuda-oxide
+compiles via NVVM/libdevice — `libnvvm-sys`, `mir-importer/pipeline.rs`). The
+old failure was almost certainly `__nv_fmaf` not being linked in a kernel that
+used no other libdevice function — not a missing lowering.
+
+**Verified:** a `mul_add` probe in the `vector-add-cuda-oxide` kernel compiled,
+JIT-linked, and verified 1,048,576 elements (`a*2+b`) correctly.
+
+**Consequence — both the `asm!` lever and the cuda-oxide fork are DROPPED from
+this plan.** FMA is reached in 100% pure, compiler-lowered Rust today. The
+butterflies are written with explicit `mul_add` (complex multiply
+`re*wr - im*wi` → `re.mul_add(wr, -(im*wi))` = 1 mul + 1 fma). FMA stays a
+perf multiplier applied at tuning time (P3), not a correctness dependency.
+
+**Bonus (separate, tracked):** the same `mul_add` rewrite applies to the
+EXISTING `fft_c2c_256/1024/4096` butterflies — a quick FMA win on all three
+production kernels independent of this redesign (the "~10-20% left on the
+table" the stale note assumed was unreachable). Captured as a fast-follow.
 
 ## 7. Fallback: Approach B (packed-shared multi-FFT)
 
@@ -185,7 +188,7 @@ the safety net; chosen only on profiler evidence, not speculation.
 
 | Risk | Mitigation |
 | ---- | ---------- |
-| cuda-oxide doesn't forward inline `asm!` | P0 is the gate; escalate FMA to the fork path (§6). Kernel still builds with `mul_add` fallback (slower, but correct). |
+| ~~cuda-oxide doesn't forward inline `asm!`~~ | RESOLVED: `f32::mul_add` works today (§6); asm!/fork dropped. |
 | 8-complex/lane register pressure caps occupancy | Profiler-measured (§5); Approach B fallback (§7). |
 | `shfl_xor` correctness through cuda-oxide | Already proven by the `warp_fft32` spike (bit-exact). Low risk. |
 | Driver upgraded 580 → 595.71.05 since phase0 | Verify the zenity/sudo clock-lock path + `ncu` permission still work before trusting ratios; re-baseline cuFFT first. |
@@ -193,8 +196,9 @@ the safety net; chosen only on profiler evidence, not speculation.
 
 ## 10. Phased implementation order
 
-- **P0 — asm! FMA spike** (go/no-go): `fma-asm-spike` bin; verify compile →
-  JIT-link → run → bit-correct vs host. Decides §6 path.
+- **P0 — FMA probe** (DONE 2026-06-02): verified `f32::mul_add` compiles,
+  JIT-links, and runs correctly through cuda-oxide → libdevice `__nv_fmaf`.
+  asm!/fork dropped (§6). Pure-Rust FMA confirmed available.
 - **P1 — CPU model**: `warp256_model` (32×8) in `warp_fft.rs`, unit-tested
   `== radix-2 / rustfft` for log_n=8. Correctness oracle.
 - **P2 — GPU spike kernel**: `fft_c2c_256_warp` (single warp/FFT first, then K
@@ -205,8 +209,8 @@ the safety net; chosen only on profiler evidence, not speculation.
   cross-check + example 8/8 + pytest 29/29 green.
 - **P6 — reuse hooks**: document the macro-template extension to 1024 (32×32) /
   4096 in `phase0-findings.md`; no implementation.
-- **Tracked follow-up**: cuda-oxide `fma` lowering fork → swap `asm!` for
-  `mul_add`.
+- **Tracked follow-up**: apply the `mul_add` FMA rewrite to the existing
+  `fft_c2c_256/1024/4096` butterflies (separate quick win on all three; §6).
 
 ## 11. Testing strategy
 
