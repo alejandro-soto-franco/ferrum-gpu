@@ -223,22 +223,27 @@ mod kernels {
                     unsafe { (BUF[si], BUF[si + 1]) }
                 }};
             }
-            // twiddle-multiply input p by W_m^(p*k), via FMA.
+            // twiddle-multiply input p by W_m^(p*k).
             //
-            // `f32::mul_add` DOES lower correctly here: cuda-oxide maps it to
-            // libdevice `__nv_fmaf` (NVVM-inlined to a single `fma.rn.f32`).
-            // An earlier note here claimed it was an unresolved extern -> that
-            // was stale (an unlinked __nv_fmaf in a kernel using no other
-            // libdevice fn); verified working 2026-06-02. NOTE: FMA is
-            // perf-neutral at batch=256 (these kernels are latency/occupancy-
-            // bound, not ALU-bound) — kept as the canonical numerically-
-            // equal-or-better form. See tools/phase0-findings.md.
+            // Kept as plain mul/sub (NOT `f32::mul_add`). TWO cuda-oxide
+            // backends build this repo and they DISAGREE on FMA:
+            //   * `cargo oxide` (bins/example) uses the git-dep rev 6ed9938,
+            //     where `mul_add` -> libdevice `__nv_fmaf` lowers fine.
+            //   * the wheel (`maturin develop/build`) uses the STANDALONE
+            //     backend ~/.cargo/cuda-oxide/librustc_codegen_cuda.so, which is
+            //     OLDER and does NOT lower `mul_add` — it silently emits an empty
+            //     PTX bundle ("load_kernels: bundle has no Ptx payload"), so
+            //     pytest 29x errors. Using `mul_add` here breaks `pip install`.
+            // FMA is also perf-neutral at batch=256 (latency/occupancy-bound,
+            // not ALU-bound), so there's no reason to risk it. To adopt FMA,
+            // first rebuild the standalone backend to match 6ed9938. See
+            // tools/phase0-findings.md.
             macro_rules! tw {
                 ($p:expr, $re:expr, $im:expr) => {{
                     let wi_off = tw_base + 2 * ($p);
                     let wr = twiddles[wi_off];
                     let wi = twiddles[wi_off + 1];
-                    ($re.mul_add(wr, -($im * wi)), $re.mul_add(wi, $im * wr))
+                    ($re * wr - $im * wi, $re * wi + $im * wr)
                 }};
             }
 
@@ -433,7 +438,7 @@ mod kernels {
                     let off = tw_base + 2 * ($p);
                     let wr = twiddles[off];
                     let wi = twiddles[off + 1];
-                    ($re.mul_add(wr, -($im * wi)), $re.mul_add(wi, $im * wr))
+                    ($re * wr - $im * wi, $re * wi + $im * wr)
                 }};
             }
             let (g0r, g0i) = ld!(0);
@@ -557,7 +562,7 @@ mod kernels {
                     let off = tw_base + 2 * ($p);
                     let wr = twiddles[off];
                     let wi = twiddles[off + 1];
-                    ($re.mul_add(wr, -($im * wi)), $re.mul_add(wi, $im * wr))
+                    ($re * wr - $im * wi, $re * wi + $im * wr)
                 }};
             }
             let (g0r, g0i) = ld!(0);

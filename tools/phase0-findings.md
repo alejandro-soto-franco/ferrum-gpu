@@ -141,8 +141,19 @@ array-in-local-memory issues.
 > VERIFIED: a `mul_add` probe in the `vector-add-cuda-oxide` kernel compiled,
 > JIT-linked, and verified 1,048,576 elements (`a*2+b`) correctly. So FMA is
 > reachable in 100% pure compiler-lowered Rust (`re*wr - im*wi` ->
-> `re.mul_add(wr, -(im*wi))`); the ~10-20% is NOT codegen-blocked. The existing
-> 256/1024/4096 butterflies can take this win directly. No `asm!`, no fork.
+> `re.mul_add(wr, -(im*wi))`); the ~10-20% is NOT codegen-blocked. No `asm!`,
+> no fork.
+>
+> **IMPORTANT CAVEAT (added after testing): this is true ONLY for the
+> `cargo oxide` git-dep backend (rev 6ed9938).** The shipped WHEEL is built by
+> `maturin` with a SEPARATE STANDALONE backend
+> `~/.cargo/cuda-oxide/librustc_codegen_cuda.so`, which is OLDER and does NOT
+> lower `mul_add` — it silently emits an empty PTX bundle, so `pytest` fails
+> 29x with "load_kernels: bundle has no Ptx payload". So `mul_add` in the
+> shipped kernels (kernels_body.rs) breaks `pip install` until that standalone
+> backend is rebuilt to match 6ed9938. The two cuda-oxide installs disagree —
+> this is a real shipping footgun. The warp/spike artefacts use `mul_add` and
+> work because they only build via `cargo oxide`, never the wheel.
 
 Status: codegen-level spill recovery is done (the cuda-oxide-is-bad-at-PTX
 hypothesis is confirmed and largely mitigated at source level). Remaining
@@ -401,9 +412,17 @@ A/B under locked 1500 MHz (median of 4, ratio vs cuFFT), driver 595:
 these kernels are latency/occupancy/memory-bound (0.41 waves/SM; cf. the warp
 finding above), NOT ALU-bound, so the saved twiddle multiplies hide behind
 memory+sync latency. The phase0 "~10-20% left on the table" estimate was for an
-ALU-saturated regime, not this tiny-batch latency-bound one. FMA kept anyway
-(canonical form, numerically equal-or-better, and it concretely exercises the
-P0 `mul_add`-works fix); the fallback resize is a genuine bug fix.
+ALU-saturated regime, not this tiny-batch latency-bound one.
+
+**FMA REVERTED from kernels_body (the shipped kernels).** Beyond being
+perf-neutral, `mul_add` in kernels_body BREAKS THE WHEEL: `maturin` builds the
+Python module with the older standalone backend (see the §FMA caveat above),
+which doesn't lower `mul_add` -> empty PTX bundle -> `pytest` 29x errors with
+"bundle has no Ptx payload". Verified: non-FMA = pytest 29/29 PASS; FMA = 29
+errors. So FMA is off the table for the shipped kernels until the standalone
+backend is rebuilt to match rev 6ed9938. The **fallback shared resize
+(64->32 KiB) is KEPT** — it's FMA-independent, a genuine latent-bug fix, and
+passes pytest 29/29 + example 8/8.
 
 NOTE: driver 595 moved the N=256 baseline from phase0's 1.32x (driver 580,
 1500 MHz) to ~1.55x — cuFFT got relatively faster; always A/B within one driver.
