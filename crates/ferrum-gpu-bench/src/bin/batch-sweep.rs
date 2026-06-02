@@ -15,13 +15,14 @@ use ferrum_gpu_fft::{Complex32, Direction, Plan};
 
 include!("../../../ferrum-gpu-fft-kernels/src/kernels_body.rs");
 include!("../../../ferrum-gpu-fft-kernels/src/fft256_warp_body.rs");
-include!("../../../ferrum-gpu-fft-kernels/src/fft256_r16s_body.rs");
 
 fn main() -> Result<()> {
     let (core_ctx, cudarc_ctx) = init_cuda_contexts()?;
+    // fft_c2c_256_r16s now lives in `mod kernels` (shipped via the wheel);
+    // exercise that exact kernel here rather than a duplicate standalone copy.
     let mod_k = kernels::load(&core_ctx)?;
     let mod_w = fft256_warp::load(&core_ctx)?;
-    let mod_r = fft256_r16s::load(&core_ctx)?;
+    let mod_r = &mod_k;
     let stream = core_ctx.default_stream();
 
     let wblock: u32 = std::env::var("WARP_BLOCK").ok().and_then(|s| s.parse().ok()).unwrap_or(256);

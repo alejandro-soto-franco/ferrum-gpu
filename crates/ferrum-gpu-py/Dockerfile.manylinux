@@ -53,13 +53,27 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
         --component rust-src --component rustc-dev --component llvm-tools \
         --component clippy
 
-# Install cargo-oxide. The build respects rust-toolchain.toml inside the
-# cloned repo (nightly-2026-04-03).
-RUN cargo install --git https://github.com/NVlabs/cuda-oxide.git cargo-oxide
+# Install cargo-oxide AND the codegen backend from the personal fork
+# (github.com/alejandro-soto-franco/cuda-oxide), which carries the fail-loud
+# miscompile fixes and correctly lowers the kernels the wheel ships
+# (u64-coalesced IO, f32::from_bits). Override OXIDE_FORK to build from a
+# different remote. The build respects each repo's rust-toolchain.toml
+# (nightly-2026-04-03).
+ARG OXIDE_FORK=https://github.com/alejandro-soto-franco/cuda-oxide.git
+RUN cargo install --git ${OXIDE_FORK} cargo-oxide
 
-# Bootstrap the codegen backend (caches at ~/.cargo/cuda-oxide/).
-# Skip cuda-gdb check; it's optional.
-RUN cargo oxide setup || cargo oxide doctor || true
+# Build the fork's codegen backend EXPLICITLY rather than via `cargo oxide
+# setup` (which would bootstrap whatever backend cargo-oxide defaults to, not
+# necessarily the fork's). rustc-codegen-cuda is a nested workspace; its
+# rust-toolchain.toml pins the same nightly + rustc-dev. The wheel's RUSTFLAGS
+# point maturin at the resulting .so (see build-wheel.sh), so we stage it at
+# the conventional cache path.
+RUN git clone --depth 1 ${OXIDE_FORK} /opt/cuda-oxide-fork && \
+    cd /opt/cuda-oxide-fork/crates/rustc-codegen-cuda && \
+    cargo build && \
+    mkdir -p /root/.cargo/cuda-oxide && \
+    cp target/debug/librustc_codegen_cuda.so \
+       /root/.cargo/cuda-oxide/librustc_codegen_cuda.so
 
 # Install maturin + patchelf.
 RUN /opt/python/cp310-cp310/bin/pip install --no-cache-dir maturin patchelf

@@ -53,6 +53,21 @@ pub fn twiddles_radix4(log_n: u32) -> Vec<Complex32> {
     out
 }
 
+/// Flat root-of-unity table `W_N^e = exp(-2 pi i e / N)` for `e in 0..N`,
+/// interleaved `[re, im, ...]`, where `N = 1 << log_n`. This is the twiddle
+/// table the scalarised radix-16 large-batch kernels (`fft_c2c_256_r16s`,
+/// `fft_c2c_4096_r16s`) index directly as `w[(p*k*fac) mod N]`. Length `N`.
+pub fn twiddles_full_roots(log_n: u32) -> Vec<Complex32> {
+    let n = 1usize << log_n;
+    let scale = -2.0 * PI / n as f32;
+    let mut out = Vec::with_capacity(n);
+    for e in 0..n {
+        let theta = scale * e as f32;
+        out.push(Complex32::new(theta.cos(), theta.sin()));
+    }
+    out
+}
+
 /// Input-twiddle table for a radix-8 Stockham auto-sort FFT of length
 /// `1 << log_n` (`log_n` must be a positive multiple of 3).
 ///

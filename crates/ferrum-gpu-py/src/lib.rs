@@ -19,7 +19,7 @@ use anyhow::{Result, anyhow};
 use cuda_core::embedded::{ArtifactPayloadKind, artifact_bundles_from_binary_path};
 use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
 
-use ferrum_gpu_fft::{KernelKind, Plan};
+use ferrum_gpu_fft::{KernelKind, Plan, R16S_MIN_BATCH, twiddles_full_roots};
 
 use numpy::{
     IntoPyArray, PyArray1, PyArray2, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2,
@@ -110,10 +110,21 @@ fn run_fft_flat_with_device(
         }
     }
 
-    // Twiddles match the plan's specialised kernel (radix-8 for N=4096,
-    // radix-2 otherwise). Inverse uses the host conjugate trick, so the
-    // forward-only kernel choice depends only on log_n.
-    let kernel_tw = plan.kernel_twiddles();
+    // Large batches of N=256 / N=4096 go to the scalarised radix-16 +
+    // u64-coalesced kernels (cuFFT parity / 1.74x; see R16S_MIN_BATCH);
+    // smaller batches stay on the latency-tuned register/shared kernels.
+    // Inverse uses the host-conjugate trick, so the forward-only kernel
+    // choice depends only on (log_n, batch).
+    let use_r16s = batch >= R16S_MIN_BATCH && (log_n == 8 || log_n == 12);
+
+    // Twiddles: r16s indexes the flat W_N^e roots table; the other
+    // specialised kernels use their own per-stage layout (radix-8 for N=4096,
+    // radix-4 for N=256/1024, radix-2 fallback).
+    let kernel_tw = if use_r16s {
+        twiddles_full_roots(log_n)
+    } else {
+        plan.kernel_twiddles()
+    };
     let mut twiddles_flat: Vec<f32> = Vec::with_capacity(kernel_tw.len() * 2);
     for c in &kernel_tw {
         twiddles_flat.push(c.re);
@@ -124,46 +135,68 @@ fn run_fft_flat_with_device(
     let dbuf_tw = DeviceBuffer::from_host(&stream, &twiddles_flat)?;
     let mut dbuf_out = DeviceBuffer::<f32>::zeroed(&stream, total * 2)?;
 
-    match plan.kernel_kind {
-        KernelKind::Specialised4096 => {
-            let cfg = LaunchConfig {
-                grid_dim: (batch as u32, 1, 1),
-                block_dim: (512, 1, 1),
-                shared_mem_bytes: 0,
-            };
-            module.fft_c2c_4096(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+    if use_r16s {
+        // 256: 1 FFT/block, 32 threads. 4096: 1 FFT/block, 256 threads.
+        match log_n {
+            8 => {
+                let cfg = LaunchConfig {
+                    grid_dim: (batch as u32, 1, 1),
+                    block_dim: (32, 1, 1),
+                    shared_mem_bytes: 0,
+                };
+                module.fft_c2c_256_r16s(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+            }
+            _ => {
+                let cfg = LaunchConfig {
+                    grid_dim: (batch as u32, 1, 1),
+                    block_dim: (256, 1, 1),
+                    shared_mem_bytes: 0,
+                };
+                module.fft_c2c_4096_r16s(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+            }
         }
-        KernelKind::Specialised1024 => {
-            let cfg = LaunchConfig {
-                grid_dim: (batch as u32, 1, 1),
-                block_dim: (256, 1, 1),
-                shared_mem_bytes: 0,
-            };
-            module.fft_c2c_1024(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
-        }
-        KernelKind::Specialised256 => {
-            let cfg = LaunchConfig {
-                grid_dim: (batch as u32, 1, 1),
-                block_dim: (64, 1, 1),
-                shared_mem_bytes: 0,
-            };
-            module.fft_c2c_256(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
-        }
-        _ => {
-            let block_threads = core::cmp::min(n / 2, 1024) as u32;
-            let cfg = LaunchConfig {
-                grid_dim: (batch as u32, 1, 1),
-                block_dim: (block_threads, 1, 1),
-                shared_mem_bytes: 0,
-            };
-            module.fft_radix2_c2c_pow2_1d_fallback(
-                stream.as_ref(),
-                cfg,
-                &dbuf_in,
-                &dbuf_tw,
-                &mut dbuf_out,
-                log_n,
-            )?;
+    } else {
+        match plan.kernel_kind {
+            KernelKind::Specialised4096 => {
+                let cfg = LaunchConfig {
+                    grid_dim: (batch as u32, 1, 1),
+                    block_dim: (512, 1, 1),
+                    shared_mem_bytes: 0,
+                };
+                module.fft_c2c_4096(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+            }
+            KernelKind::Specialised1024 => {
+                let cfg = LaunchConfig {
+                    grid_dim: (batch as u32, 1, 1),
+                    block_dim: (256, 1, 1),
+                    shared_mem_bytes: 0,
+                };
+                module.fft_c2c_1024(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+            }
+            KernelKind::Specialised256 => {
+                let cfg = LaunchConfig {
+                    grid_dim: (batch as u32, 1, 1),
+                    block_dim: (64, 1, 1),
+                    shared_mem_bytes: 0,
+                };
+                module.fft_c2c_256(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+            }
+            _ => {
+                let block_threads = core::cmp::min(n / 2, 1024) as u32;
+                let cfg = LaunchConfig {
+                    grid_dim: (batch as u32, 1, 1),
+                    block_dim: (block_threads, 1, 1),
+                    shared_mem_bytes: 0,
+                };
+                module.fft_radix2_c2c_pow2_1d_fallback(
+                    stream.as_ref(),
+                    cfg,
+                    &dbuf_in,
+                    &dbuf_tw,
+                    &mut dbuf_out,
+                    log_n,
+                )?;
+            }
         }
     }
 

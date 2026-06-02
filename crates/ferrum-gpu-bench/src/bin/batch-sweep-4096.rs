@@ -10,12 +10,13 @@ use ferrum_gpu_bench::{alternating_bench_batch, init_cuda_contexts};
 use ferrum_gpu_fft::{Complex32, Direction, Plan};
 
 include!("../../../ferrum-gpu-fft-kernels/src/kernels_body.rs");
-include!("../../../ferrum-gpu-fft-kernels/src/fft4096_r16s_body.rs");
 
 fn main() -> Result<()> {
     let (core_ctx, cudarc_ctx) = init_cuda_contexts()?;
+    // fft_c2c_4096_r16s now lives in `mod kernels` (shipped via the wheel);
+    // exercise that exact kernel here rather than a duplicate standalone copy.
     let mod_k = kernels::load(&core_ctx)?;
-    let mod_r = fft4096_r16s::load(&core_ctx)?;
+    let mod_r = &mod_k;
     let stream = core_ctx.default_stream();
     let batches: Vec<usize> = std::env::var("BATCHES").unwrap_or_else(|_| "1024,4096,16384,65536".into())
         .split(',').filter_map(|s| s.trim().parse().ok()).collect();
@@ -23,9 +24,12 @@ fn main() -> Result<()> {
     let w4096: Vec<f32> = (0..4096).flat_map(|e| { let t=-2.0*PI*e as f32/4096.0; [t.cos(),t.sin()] }).collect();
     let d_w4096 = DeviceBuffer::from_host(&stream, &w4096)?;
 
-    // r16s-4096 correctness vs radix-2 (batch 2).
+    // r16s-4096 correctness vs radix-2. Use a multi-block batch (512) so
+    // co-resident blocks on each SM exercise the in-place shared-buffer
+    // gather/scatter: the kernel's intra-stage barrier is what keeps that
+    // race-free, and a batch of 2 was too small to expose a missing one.
     {
-        let bb=2usize; let n=4096usize;
+        let bb=512usize; let n=4096usize;
         let input: Vec<Complex32> = (0..bb*n).map(|i| Complex32::new((i as f32*0.0007).sin(),(i as f32*0.0011).cos())).collect();
         let flat: Vec<f32> = input.iter().flat_map(|c| [c.re,c.im]).collect();
         let d_in = DeviceBuffer::from_host(&stream,&flat)?;

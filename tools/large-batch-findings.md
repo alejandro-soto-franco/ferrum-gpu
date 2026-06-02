@@ -1,5 +1,22 @@
 # Large-batch (throughput regime): how pure-Rust reaches cuFFT parity
 
+> UPDATE 2026-06-02 (ship + correctness): the radix-16 kernels now live in
+> `crates/ferrum-gpu-fft-kernels/src/kernels_body.rs` (the single module the
+> wheel, bench, and examples all `include!`), NOT the old standalone
+> `fft256_r16s_body.rs` / `fft4096_r16s_body.rs` files (deleted). The Python
+> wheel ships them: `run_fft_flat_with_device` routes N=256/4096 at
+> `batch >= ferrum_gpu_fft::R16S_MIN_BATCH` (4096) to the radix-16 kernels.
+> The wheel is built through the personal cuda-oxide fork backend
+> (Makefile `FERRUM_GPU_BACKEND`), pytest green (35 cases incl. large-batch
+> r16s vs numpy). **The earlier "N=4096 = 1.74x, bit-exact" claim was WRONG:
+> that kernel had a data race** (in-place shared gather/scatter with 8 warps
+> and no intra-stage barrier) that only manifested at large batch /
+> many-co-resident-blocks, which the batch=2 bench check never exposed. Adding
+> one `sync_threads()` between the per-stage gather and scatter fixes it; the
+> honest, race-free number is **~1.37x (batch 4096) to 1.44x (batch 16384)**
+> vs cuFFT (still ~18-22% better than radix-8). The N=256 kernel is
+> single-warp/lockstep and was always correct. See the closing section.
+
 Date: 2026-06-02. GPU: RTX 5060 Laptop (sm_120). Clock locked 1500 MHz.
 Metric: `alternating_bench_batch` event-time, ratio = ferrum / cuFFT (lower is
 better; <1.0 BEATS cuFFT). Bins: `batch-sweep` (N=256), `batch-sweep-4096`.
@@ -56,11 +73,13 @@ N=256 (`batch-sweep`):
 | 65536  | 1.76 | 1.24   | 1.03        |
 | 262144 | 1.70 | 1.20   | **0.95–1.01 (PARITY / WIN)** |
 
-N=4096 (`batch-sweep-4096`, OOM beyond 16384):
-| batch | radix8 (old) | radix16+u64 |
-| ----- | ------------ | ----------- |
-| 4096  | 2.46         | 1.86        |
-| 16384 | 2.38         | **1.74**    |
+N=4096 (`batch-sweep-4096`, OOM beyond 16384). The radix16+u64 column here is
+the ORIGINAL racy kernel (no intra-stage barrier); see the closing section for
+the corrected, race-free numbers (~1.37-1.44x):
+| batch | radix8 (old) | radix16+u64 (racy, superseded) |
+| ----- | ------------ | ------------------------------ |
+| 4096  | 2.46         | 1.86                           |
+| 16384 | 2.38         | ~~1.74~~ (raced)               |
 
 Trend: ratio falls monotonically with batch (the GPU fills: occupancy ~95%).
 N=256 is DRAM-bound at parity; N=4096 is held back by its 32 KiB shared/block
@@ -128,6 +147,66 @@ Shipping a miscompiled FFT to save microseconds is the wrong trade. NOTE: ncu
 replay is a good race/correctness oracle — use it to vet kernels. A real 4096
 conflict fix needs per-stage swizzle analysis (the gather stride is 256 every
 stage, but the scatter pattern differs), not one uniform pad.
+
+## SHIP + the N=4096 data race (2026-06-02)
+
+Integrating the radix-16 kernels into the Python wheel exposed a real bug the
+benchmark had hidden. The wheel routes N=256/4096 at batch >= `R16S_MIN_BATCH`
+(4096) to these kernels; a new pytest case (N=4096 fwd, batch 4096, vs numpy)
+failed with **rel err 0.18, non-deterministic** (1773 / 1765 / 1880 bad lanes
+across three runs, different lanes each time) even though the input was the
+SAME signal tiled across all lanes (so a correct kernel MUST emit identical
+output per lane). Non-determinism + identical input = a data race.
+
+Root cause: the N=4096 kernel does an **in-place** radix-16 stage on one shared
+buffer with **256 threads = 8 warps**, and had **no barrier between the per-stage
+gather and scatter**. A warp that reaches the scatter first overwrites BUF
+entries a slower warp has not yet read. The N=256 kernel is a SINGLE warp (32
+threads, 16 active) running in lockstep, so its 16 reads always precede its 16
+writes, so it never needed the barrier and was always correct. With 8 warps the
+hazard is real and shows up only at large batch (many co-resident blocks per SM),
+which is why the bench's batch=2 correctness check never caught it, and why the
+"1.74x bit-exact" claim was false.
+
+Fix: one `thread::sync_threads()` between the gather/compute and the scatter in
+the N=4096 stage (all 256 threads run it uniformly, no divergence -> no deadlock).
+After the fix: pytest green, and the determinism probe shows 0 bad lanes across
+3 runs. The bench's correctness check was hardened from batch=2 to batch=512 so
+this race class is caught in future (it is now a genuine race oracle, cheaper
+than ncu replay).
+
+Corrected, race-free perf (locked 1500 MHz, driver 595, ratio vs cuFFT):
+| batch | radix8 | radix16+u64 (barrier) |
+| ----- | ------ | --------------------- |
+| 4096  | 1.604  | **1.371**             |
+| 16384 | 1.766  | **1.440**             |
+Still ~18-22% faster than radix-8; ~1.37-1.44x of cuFFT (the barrier costs a
+little vs the racy timing, but that timing measured a wrong kernel).
+
+## Shipping the wheel through the fork (2026-06-02)
+
+The wheel now builds through the PERSONAL cuda-oxide fork backend, not the stale
+standalone at `~/.cargo/cuda-oxide`. Mechanics:
+- `Makefile`: `FERRUM_GPU_BACKEND ?= ~/cuda-oxide/crates/rustc-codegen-cuda/target/debug/librustc_codegen_cuda.so`
+  feeds `-Z codegen-backend=` for `make develop` / `make wheel`. Build the
+  backend with `cd ~/cuda-oxide/crates/rustc-codegen-cuda && cargo build` (a
+  NESTED workspace; its `target/` is symlinked to /home/cargo-targets per the
+  btrfs rule).
+- `Dockerfile.manylinux` + `build-wheel.sh`: the PyPI image clones the fork,
+  builds `rustc-codegen-cuda`, and points maturin's RUSTFLAGS at it (untested in
+  the integration session: validate with `make wheel-manylinux`).
+- Kernels are a SINGLE source of truth in `kernels_body.rs`'s `mod kernels`;
+  the standalone `fft256_r16s_body.rs` / `fft4096_r16s_body.rs` were DELETED
+  (the kernel export symbol is `cuda_oxide_kernel_<hash>_<fn>` keyed by fn name
+  + content, NOT the Rust module, so the same kernel in two modules is a hard
+  "symbol already defined" error under the fork's fail-loud codegen). The bench
+  bins now call `kernels::fft_c2c_*_r16s`.
+
+Known limitation: the fork backend does not load a binary with TWO+
+`#[cuda_module]` blocks (`batch-sweep`, which also has `mod fft256_warp`, fails
+at runtime with "embedded CUDA module 'ferrum-gpu-bench' was not found"); single
+-module binaries (the wheel, `batch-sweep-4096`) are fine. The wheel is
+single-module, so this does not affect shipping.
 - **Integrate into perf-gate / KernelKind** once shipped, with cross-check +
   pytest, and a batch-aware kernel selection (warp/radix4 small-batch latency
   vs radix16 large-batch throughput).
