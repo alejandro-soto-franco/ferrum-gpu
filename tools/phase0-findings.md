@@ -342,6 +342,42 @@ specialised size now beats its radix-2 fallback by 2-5x. The shared-memory
 radix-R Stockham family (scalarized, inline butterfly macro, single buffer) is
 the established winning pattern.
 
+## N=256 warp-per-FFT redesign (2026-06-02): profiler REFUTES the approach
+
+Built `fft_c2c_256_warp` (`fft256_warp_body.rs`): one warp = one 256-pt FFT,
+256 = 32x8, register-resident (in-register dft8 + W_256 twiddle + 8-wide 32-pt
+warp shfl), zero shared / zero syncthreads, pure-Rust `mul_add` FMA. Correct:
+max_rel_err 3.08e-5 vs radix-2 (CPU oracle `warp256_model` = four_step_model
+N1=32,N2=8). Spike `fft256-warp-spike`; alternating gate `perf-gate-warp256`
+(env `WARP_BLOCK` sweeps K = warps/block).
+
+Result (unlocked, alternating vs cuFFT): ratio is BEST at K=1 (2.15x) and gets
+monotonically WORSE with more warps/block (K=8 -> 2.66x, K=32 -> 5.29x). So the
+"multiple FFTs per block" lever HURTS here. Worse than the existing radix-4
+(1.32x).
+
+ncu (K=1, sudo via zenity askpass): **40 reg/thread** (not register-bound),
+**17% achieved occupancy**, **0.41 waves/SM**, 10.69 us. The bottleneck is
+GRID STARVATION, not register pressure: at batch=256 a warp-per-FFT launches
+only 256 warps (32 threads/FFT) = 0.41 of one wave -> the grid does not fill
+the GPU once. More K -> fewer blocks -> even smaller grid -> worse.
+
+DECISIVE INVERSION: at this tiny, latency-bound batch the spec's premise is
+backwards. You want MORE threads/FFT (more warps in flight), not fewer. radix-4
+wins (1.32x) precisely because it uses 64 threads/FFT (2 warps -> 512 warps,
+2x the parallelism of warp-per-FFT's 256). cuFFT's vector_fft likewise.
+
+DECISION: warp-per-FFT is NOT the path to beat cuFFT at N=256 (kept as a
+documented research artifact; correct, not wired). The profiler-indicated
+levers instead:
+  1. FMA the EXISTING radix-4 fft_c2c_256 butterflies (`mul_add`, now proven to
+     work) — certain ~10-20%, brings 1.32x toward ~1.1-1.2x. Lowest risk.
+  2. radix-16 shared kernel (256 = 16x16, 2 stages = 1 barrier vs radix-4's 4
+     stages/3 barriers), MORE threads/FFT, FMA'd — attacks barriers AND raises
+     warps-in-flight, the two things the profiler says matter here.
+  3. Caveat (per the earlier nvcc-ceiling note): beating cuFFT at a latency-
+     bound tiny batch is research-grade and may be infeasible.
+
 ## Phase 0 summary
 
 Design adjustments for Phase 3+:

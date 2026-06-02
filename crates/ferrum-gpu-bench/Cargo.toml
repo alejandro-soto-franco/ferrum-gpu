@@ -42,6 +42,10 @@ name = "fft256-warp-spike"
 path = "src/bin/fft256-warp-spike.rs"
 
 [[bin]]
+name = "perf-gate-warp256"
+path = "src/bin/perf-gate-warp256.rs"
+
+[[bin]]
 name = "fft-1024-spike"
 path = "src/bin/fft-1024-spike.rs"
 
