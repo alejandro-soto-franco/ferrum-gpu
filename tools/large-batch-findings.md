@@ -92,10 +92,42 @@ N=256 is DRAM-bound at parity; N=4096 is held back by its 32 KiB shared/block
   try fewer-stage factorisations; or a two-kernel four-step.
 - **N=1024** (= 2^10, not a power of 16): needs mixed radix (16x16x4) or
   radix-32. Not yet built.
-- **Upstream `ld.global` + vectorisation in cuda-oxide**: the highest-leverage
-  fix — it would lift coalescing for every kernel and likely beat cuFFT
-  outright at every size. A contributor PR (the author is a cuda-oxide
-  contributor).
+- **`ld.global.v4` vectorisation in the cuda-oxide FORK** (`~/cuda-oxide`, the
+  owner controls it). Scoped 2026-06-02. cuda-oxide is an MLIR/pliron compiler;
+  `convert_load` (mir-lower/convert/ops/memory.rs) emits ONE `llvm::LoadOp` of
+  the converted result type, and a `CuSimd<f32,4>` converts to an LLVM AGGREGATE
+  -> legalised to 4 scalar `ld.b32` (PTX-confirmed; the Task-0.2 "expected v4"
+  was never real). There IS an LLVM-dialect `VectorType` (-> NVVM `ld.v4`), and
+  `tcgen05.ld`/`shfl` are the precedent: a `cuda_device` intrinsic -> `nvvm`
+  dialect op -> INLINE PTX. So the fix is a 4-change intrinsic:
+    1. cuda-device: `ld_global_v4(ptr)->CuSimd<f32,4>` (+ v2, + stores).
+    2. dialect-nvvm: a vector global-load op.
+    3. mir-importer: recognise the call -> that op.
+    4. mir-lower: lower to inline PTX `ld.global.v4.f32 {%0..%3},[%4]`.
+  Build: `cd ~/cuda-oxide/crates/rustc-codegen-cuda && cargo build` produces the
+  backend .so; ferrum-gpu picks it up via `CUDA_OXIDE_BACKEND=<that .so>`
+  (backend.rs discovery order: env > local repo > ~/.cargo/cuda-oxide cache).
+  CAVEAT: marginal at N=256 (DRAM roofline) — value is instruction-bound kernels
+  + clean &[f32] code + reusability. A focused dedicated session (long backend
+  builds). Merged fork branch fix/fail-loud-silent-miscompiles -> main (c8b3103).
+
+## N=4096 bank-conflict + occupancy (2026-06-02): lever identified, swizzle reverted
+
+Profiled r16s-4096 @ batch 16384: **DRAM only 57%** (NOT at roofline — cuFFT-4096
+IS at roofline ~0.21us), **occupancy 49.5% limited to 3 blocks/SM by the 32 KiB
+shared**, **5.6M ld.shared bank conflicts** (the stride-256 radix-16 gather is
+bank-aligned -> 16-way conflict), 48 reg/thread. So 4096 (1.74x) has real
+headroom to parity if the conflicts + occupancy are fixed.
+
+Tried: a uniform shared swizzle `phys(i)=i+i/256` (1 pad slot per 256 complex)
+to make the 16 gathered elements land in banks {0,2,..,30}. It's a correct
+bijection AND race-free (with an added intra-stage barrier), yet produced WRONG
+output that ncu's kernel-replay caught (proven kernel passes 9 replays; swizzled
+fails). Root cause not found quickly -> REVERTED to the proven 1.74x kernel.
+Shipping a miscompiled FFT to save microseconds is the wrong trade. NOTE: ncu
+replay is a good race/correctness oracle — use it to vet kernels. A real 4096
+conflict fix needs per-stage swizzle analysis (the gather stride is 256 every
+stage, but the scatter pattern differs), not one uniform pad.
 - **Integrate into perf-gate / KernelKind** once shipped, with cross-check +
   pytest, and a batch-aware kernel selection (warp/radix4 small-batch latency
   vs radix16 large-batch throughput).
