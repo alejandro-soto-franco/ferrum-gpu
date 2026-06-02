@@ -408,16 +408,41 @@ P0 `mul_add`-works fix); the fallback resize is a genuine bug fix.
 NOTE: driver 595 moved the N=256 baseline from phase0's 1.32x (driver 580,
 1500 MHz) to ~1.55x — cuFFT got relatively faster; always A/B within one driver.
 
+### radix-16 lever (2026-06-02): blocked by codegen + predicted occupancy loss
+
+Profiled the production radix-4 fft_c2c_256 (1.55x): 31 reg/thread, **0.41
+waves/SM, 40% occupancy, compute SOL 26%, memory SOL 45%** — confirms the
+radix family is ALSO grid-starved/latency-bound at batch=256 (GPU <half busy,
+neither SOL near peak). This motivated radix-16 (256=16x16, 2 barriers vs
+radix-4's 4) — the barrier trend favours it (radix-2 8-barrier 6.34x ->
+radix-4 4-barrier 1.55x). BUT radix-16 has only 16 butterflies/FFT -> 16
+threads/FFT -> ~256 warps total = the SAME ceiling the warp kernel starved at
+(0.41 waves). So it trades radix-4's 2x occupancy for half the barriers.
+
+Attempted (`fft256_r16_body.rs`, dft16 = two dft8 + W_16 combine, W_256-table
+twiddles): cuda-oxide REJECTED it — "PTX generation failed: invalid input
+program". Cause: runtime-indexed `[f32;N]` arrays + `const [(f32,f32);8]` +
+loops; cuda-oxide needs full scalarisation into named registers (as the
+existing kernels do). Compiling radix-16 needs a ~150-line hand-unroll
+(16 gathers, 15 twiddles, scalarised dft16, 16 scatters). NOT done: predicted
+to lose on the 256-warp occupancy ceiling (same condition that sank the warp
+kernel at 2.15x), so the scalarisation cost is not justified by the likely
+outcome. Files removed; revisit only if attacking a larger batch.
+
 ### Standing conclusion (2026-06-02)
 
-Two of the three pivot levers tested empirically, both REFUTED for beating
-cuFFT at N=256: (1) warp-per-FFT redesign — grid-starved; (2) FMA — perf-neutral
-(latency-bound). The benchmark regime (batch=256, N=256) is latency/occupancy-
-bound with the GPU <half-occupied (0.41 waves); cuFFT's `vector_fft` is a
-tighter latency-optimised kernel for exactly this regime. Remaining untried
-lever aligned with the profiler insight (more threads/FFT + fewer barriers):
-radix-16 shared (256 = 16x16, 1 barrier). Beating cuFFT here remains
-research-grade and may be infeasible.
+Three levers explored for beating cuFFT at N=256, all REFUTED or predicted-loss:
+(1) warp-per-FFT — grid-starved (0.41 waves, 2.15x); (2) FMA — perf-neutral
+(latency-bound, not ALU-bound); (3) radix-16 — codegen-blocked + the same
+occupancy ceiling as (1). The radix family is U-shaped with the optimum already
+at radix-4: radix-2 (more threads) loses to barriers, radix-16 (fewer threads)
+loses to occupancy. The root cause is structural: at batch=256, N=256 there is
+not enough work to fill the GPU (0.41 waves on EVERY kernel tried), so the
+regime is latency-bound and cuFFT's hand-tuned `vector_fft` wins. Beating cuFFT
+here is research-grade and likely infeasible WITHOUT changing the regime —
+the parallelism only exists at large batch (e.g. 4096+), where the
+"multiple-FFTs-per-block" and FMA theses should actually hold. Recommended next
+direction if pursued: measure the warp/FMA kernels at batch >= 4096.
 
 ## Phase 0 summary
 
