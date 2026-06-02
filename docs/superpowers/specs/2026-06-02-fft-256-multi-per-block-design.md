@@ -2,7 +2,19 @@
 
 Date: 2026-06-02
 Branch: `feat/fft-256-warp-per-block`
-Status: approved (brainstorming), implementation authorised to begin immediately.
+Status: approved (brainstorming), implemented + investigated.
+
+> OUTCOME (2026-06-02, see `tools/phase0-findings.md` for the full log): the
+> warp-per-FFT kernel was built and is correct but does NOT beat cuFFT at
+> N=256 — it's grid-starved (0.41 waves/SM, batch=256 under-fills the GPU).
+> FMA (P0's "free win") works under `cargo oxide` but BREAKS the wheel (older
+> standalone backend) and is perf-neutral here anyway, so it was reverted from
+> the shipped kernels. radix-16 (fewer barriers) was codegen-rejected and is
+> predicted to lose on the same occupancy ceiling. Net: at batch=256 the regime
+> is latency/occupancy-bound and cuFFT's vector_fft wins; beating it needs a
+> larger batch where parallelism exists. Kept: correct warp artifact, CPU
+> oracle, ncu harness, the fallback 64->32 KiB bug-fix, and the corrected
+> FMA-works-but-only-in-the-dev-backend finding.
 
 ## 1. Goal & success criteria
 
