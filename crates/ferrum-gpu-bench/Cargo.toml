@@ -46,6 +46,10 @@ name = "perf-gate-warp256"
 path = "src/bin/perf-gate-warp256.rs"
 
 [[bin]]
+name = "batch-sweep"
+path = "src/bin/batch-sweep.rs"
+
+[[bin]]
 name = "fft-1024-spike"
 path = "src/bin/fft-1024-spike.rs"
 

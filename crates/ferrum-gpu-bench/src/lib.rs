@@ -76,6 +76,23 @@ pub fn alternating_bench(
     core_ctx: &Arc<CudaContext>,
     cudarc_ctx: &Arc<CudarcContext>,
     log_n: u32,
+    launch_ferrum: impl FnMut(
+        &DeviceBuffer<f32>,
+        &DeviceBuffer<f32>,
+        &mut DeviceBuffer<f32>,
+    ) -> Result<()>,
+) -> Result<(BenchSample, BenchSample)> {
+    alternating_bench_batch(core_ctx, cudarc_ctx, log_n, BATCH, launch_ferrum)
+}
+
+/// Like [`alternating_bench`] but with an explicit `batch` (the throughput
+/// regime: batch >> 256 saturates the GPU and flips the bottleneck from
+/// per-launch latency to kernel efficiency).
+pub fn alternating_bench_batch(
+    core_ctx: &Arc<CudaContext>,
+    cudarc_ctx: &Arc<CudarcContext>,
+    log_n: u32,
+    batch: usize,
     mut launch_ferrum: impl FnMut(
         &DeviceBuffer<f32>,
         &DeviceBuffer<f32>,
@@ -83,7 +100,7 @@ pub fn alternating_bench(
     ) -> Result<()>,
 ) -> Result<(BenchSample, BenchSample)> {
     let n = 1usize << log_n;
-    let total = n * BATCH;
+    let total = n * batch;
     let plan = Plan::new(log_n, BATCH, false);
 
     // --- ferrum (cuda-core) setup ---
@@ -119,7 +136,7 @@ pub fn alternating_bench(
     let cu_plan = CudaFft::plan_1d(
         n as i32,
         cufft_sys::cufftType::CUFFT_C2C,
-        BATCH as i32,
+        batch as i32,
         cu_stream.clone(),
     )
     .map_err(|e| anyhow!("cufft plan_1d: {e:?}"))?;
