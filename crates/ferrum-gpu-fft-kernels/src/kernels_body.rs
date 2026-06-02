@@ -20,7 +20,16 @@ mod kernels {
     ///   * `in_data` / `out_data` are interleaved `[re, im, ...]` of length `2 * N * batch`.
     ///   * `twiddles` are interleaved `[re, im, ...]`, stages descending.
     ///   * `grid_dim = (batch, 1, 1)`, `block_dim = (min(N/2, 1024), 1, 1)`.
-    ///   * `log_n` in `[2, 12]` (N in {4..4096}).
+    ///   * `log_n` in `[2, 11]` (N in {4..2048}). N=256/1024/4096 are always
+    ///     routed to the specialised kernels by `KernelKind::for_forward_pow2`,
+    ///     so the fallback never sees log_n in {8,10,12}; its max is N=2048.
+    ///
+    /// Shared: two `SharedArray<f32, 4096>` ping-pong buffers = 32 KiB total,
+    /// sized for the N=2048 worst case (2048 complex = 4096 f32 each), under the
+    /// 48 KiB sm_120 static-shared limit. The previous 8192-element (64 KiB)
+    /// sizing exceeded it and only linked when nvJitLink's whole-module LTO
+    /// happened to grant a 64 KiB carveout — FMA-ing the specialised kernels
+    /// shifted that carveout to 48 KiB and exposed the overage.
     #[kernel]
     pub fn fft_radix2_c2c_pow2_1d_fallback(
         in_data: &[f32],
@@ -28,8 +37,8 @@ mod kernels {
         mut out_data: DisjointSlice<f32>,
         log_n: u32,
     ) {
-        static mut PING: SharedArray<f32, 8192> = SharedArray::UNINIT;
-        static mut PONG: SharedArray<f32, 8192> = SharedArray::UNINIT;
+        static mut PING: SharedArray<f32, 4096> = SharedArray::UNINIT;
+        static mut PONG: SharedArray<f32, 4096> = SharedArray::UNINIT;
 
         let n = 1usize << log_n;
         let half_n = n >> 1;
@@ -214,21 +223,22 @@ mod kernels {
                     unsafe { (BUF[si], BUF[si + 1]) }
                 }};
             }
-            // twiddle-multiply input p by W_m^(p*k).
+            // twiddle-multiply input p by W_m^(p*k), via FMA.
             //
-            // NOTE: the ideal form is FMA (`re.mul_add(wr, -(im*wi))`), but
-            // `f32::mul_add` lowers to `llvm.fma.f32`, which this cuda-oxide
-            // codegen does not recognise (it only special-cases `cuda_device`
-            // intrinsics) and leaves as an unresolved extern -> nvJitLink
-            // failure. cuda-oxide also will not contract `mul`+`sub` into an
-            // FMA on its own, so the butterfly stays at 4 mul + 2 add/sub here.
-            // Reachable only via upstream codegen support; tracked in findings.
+            // `f32::mul_add` DOES lower correctly here: cuda-oxide maps it to
+            // libdevice `__nv_fmaf` (NVVM-inlined to a single `fma.rn.f32`).
+            // An earlier note here claimed it was an unresolved extern -> that
+            // was stale (an unlinked __nv_fmaf in a kernel using no other
+            // libdevice fn); verified working 2026-06-02. NOTE: FMA is
+            // perf-neutral at batch=256 (these kernels are latency/occupancy-
+            // bound, not ALU-bound) — kept as the canonical numerically-
+            // equal-or-better form. See tools/phase0-findings.md.
             macro_rules! tw {
                 ($p:expr, $re:expr, $im:expr) => {{
                     let wi_off = tw_base + 2 * ($p);
                     let wr = twiddles[wi_off];
                     let wi = twiddles[wi_off + 1];
-                    ($re * wr - $im * wi, $re * wi + $im * wr)
+                    ($re.mul_add(wr, -($im * wi)), $re.mul_add(wi, $im * wr))
                 }};
             }
 
@@ -423,7 +433,7 @@ mod kernels {
                     let off = tw_base + 2 * ($p);
                     let wr = twiddles[off];
                     let wi = twiddles[off + 1];
-                    ($re * wr - $im * wi, $re * wi + $im * wr)
+                    ($re.mul_add(wr, -($im * wi)), $re.mul_add(wi, $im * wr))
                 }};
             }
             let (g0r, g0i) = ld!(0);
@@ -547,7 +557,7 @@ mod kernels {
                     let off = tw_base + 2 * ($p);
                     let wr = twiddles[off];
                     let wi = twiddles[off + 1];
-                    ($re * wr - $im * wi, $re * wi + $im * wr)
+                    ($re.mul_add(wr, -($im * wi)), $re.mul_add(wi, $im * wr))
                 }};
             }
             let (g0r, g0i) = ld!(0);

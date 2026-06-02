@@ -378,6 +378,47 @@ levers instead:
   3. Caveat (per the earlier nvcc-ceiling note): beating cuFFT at a latency-
      bound tiny batch is research-grade and may be infeasible.
 
+### FMA lever measured (2026-06-02): perf-NEUTRAL at batch=256
+
+Applied `mul_add` FMA to the radix-4 `tw!` twiddle multiplies in
+`fft_c2c_256/1024/4096` (the only complex multiplies; the radix-4/8 DFT bodies
+are add/sub). Correct (example 8/8). Also fixed a latent bug it surfaced: the
+radix-2 fallback's two `SharedArray<f32, 8192>` = 64 KiB static shared exceeds
+the 48 KiB sm_120 limit; it had been linking only on a lucky nvJitLink LTO
+carveout, and FMA-ing the specialised kernels shifted that carveout to 48 KiB.
+Resized to `<f32, 4096>` (32 KiB; fallback max is N=2048 since 256/1024/4096 are
+always specialised).
+
+A/B under locked 1500 MHz (median of 4, ratio vs cuFFT), driver 595:
+
+| N    | non-FMA | FMA  | verdict |
+| ---- | ------- | ---- | ------- |
+| 256  | ~1.55   | ~1.51 | within noise |
+| 1024 | ~1.9    | ~2.06 | within noise |
+| 4096 | ~3.60   | ~3.68 | within noise |
+
+`ferrum_us` at 256 is unchanged (~0.035). FMA buys ~nothing here: at batch=256
+these kernels are latency/occupancy/memory-bound (0.41 waves/SM; cf. the warp
+finding above), NOT ALU-bound, so the saved twiddle multiplies hide behind
+memory+sync latency. The phase0 "~10-20% left on the table" estimate was for an
+ALU-saturated regime, not this tiny-batch latency-bound one. FMA kept anyway
+(canonical form, numerically equal-or-better, and it concretely exercises the
+P0 `mul_add`-works fix); the fallback resize is a genuine bug fix.
+
+NOTE: driver 595 moved the N=256 baseline from phase0's 1.32x (driver 580,
+1500 MHz) to ~1.55x — cuFFT got relatively faster; always A/B within one driver.
+
+### Standing conclusion (2026-06-02)
+
+Two of the three pivot levers tested empirically, both REFUTED for beating
+cuFFT at N=256: (1) warp-per-FFT redesign — grid-starved; (2) FMA — perf-neutral
+(latency-bound). The benchmark regime (batch=256, N=256) is latency/occupancy-
+bound with the GPU <half-occupied (0.41 waves); cuFFT's `vector_fft` is a
+tighter latency-optimised kernel for exactly this regime. Remaining untried
+lever aligned with the profiler insight (more threads/FFT + fewer barriers):
+radix-16 shared (256 = 16x16, 1 barrier). Beating cuFFT here remains
+research-grade and may be infeasible.
+
 ## Phase 0 summary
 
 Design adjustments for Phase 3+:
