@@ -50,6 +50,10 @@ name = "batch-sweep"
 path = "src/bin/batch-sweep.rs"
 
 [[bin]]
+name = "batch-sweep-4096"
+path = "src/bin/batch-sweep-4096.rs"
+
+[[bin]]
 name = "fft-1024-spike"
 path = "src/bin/fft-1024-spike.rs"
 
