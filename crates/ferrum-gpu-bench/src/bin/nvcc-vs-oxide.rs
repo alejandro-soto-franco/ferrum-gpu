@@ -212,6 +212,28 @@ fn main() -> Result<()> {
             worst_n = worst_n.max(en / mag);
         }
     }
+    // Optional accuracy dump (ACC_DUMP=path): write the first FFT's input and
+    // all three outputs so an offline f64 reference (numpy) can score max / RMS
+    // / ULP error per kernel. Runs cuFFT once to capture its output.
+    if let Ok(path) = std::env::var("ACC_DUMP") {
+        use std::io::Write;
+        c_plan
+            .exec_c2c(&mut c_in, &mut c_out, FftDirection::Forward)
+            .map_err(|e| anyhow!("cufft acc: {e:?}"))?;
+        cu_stream.synchronize().map_err(|e| anyhow!("sync: {e}"))?;
+        let c_host = cu_stream.clone_dtoh(&c_out).map_err(|e| anyhow!("dtoh cufft: {e}"))?;
+        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+        for t in 0..n {
+            writeln!(
+                f,
+                "{n},{t},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9}",
+                input_flat[2 * t], input_flat[2 * t + 1],
+                o_host[2 * t], o_host[2 * t + 1],
+                n_host[2 * t], n_host[2 * t + 1],
+                c_host[t].x, c_host[t].y
+            )?;
+        }
+    }
     println!("correctness vs radix-2 CPU: oxide={worst_o:.2e}  nvcc={worst_n:.2e}");
     if worst_o > 1e-3 || worst_n > 1e-3 {
         return Err(anyhow!("correctness FAIL (oxide={worst_o:.2e} nvcc={worst_n:.2e})"));
@@ -283,6 +305,22 @@ fn main() -> Result<()> {
         c_plan.exec_c2c(&mut c_in, &mut c_out, FftDirection::Forward).map_err(|e| anyhow!("cufft: {e:?}"))?;
         cu_stream.synchronize().map_err(|e| anyhow!("sync: {e}"))?;
         hs_c.push(t.elapsed().as_secs_f64());
+    }
+
+    // Optional per-trial dump (DUMP_CSV=path, REP tags the repeat) for offline
+    // statistics: paired event and host samples for all three kernels, per-FFT
+    // us. Rows: rep,batch,trial,timer,oxide_us,nvcc_us,cufft_us.
+    if let Ok(path) = std::env::var("DUMP_CSV") {
+        use std::io::Write;
+        let rep: usize = std::env::var("REP").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
+        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+        let pf = 1e6 / batch as f64; // total seconds -> per-FFT microseconds
+        for i in 0..ts_o.len() {
+            writeln!(f, "{rep},{batch},{i},event,{:.6},{:.6},{:.6}", ts_o[i] * pf, ts_n[i] * pf, ts_c[i] * pf)?;
+        }
+        for i in 0..hs_o.len() {
+            writeln!(f, "{rep},{batch},{i},host,{:.6},{:.6},{:.6}", hs_o[i] * pf, hs_n[i] * pf, hs_c[i] * pf)?;
+        }
     }
 
     let o_us = median(ts_o) * 1e6 / batch as f64;

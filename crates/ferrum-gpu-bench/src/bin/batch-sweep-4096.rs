@@ -60,6 +60,17 @@ fn main() -> Result<()> {
         let cfg = LaunchConfig { grid_dim:(bb as u32,1,1), block_dim:(256,1,1), shared_mem_bytes:0 };
         mod_r.fft_c2c_4096_4step_reg(stream.as_ref(), cfg, &d_in, &d_w4096, &mut d_out)?;
         let gpu = d_out.to_host_vec(&stream)?;
+        // Optional accuracy dump (ACC_DUMP=path): first FFT's input + four-step
+        // output, scored offline against an f64 reference. Rows:
+        // size,index,in_re,in_im,kernel_re,kernel_im.
+        if let Ok(path) = std::env::var("ACC_DUMP") {
+            use std::io::Write;
+            let mut fh = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+            for k in 0..n {
+                writeln!(fh, "{n},{k},{:.9},{:.9},{:.9},{:.9}",
+                    flat[2*k], flat[2*k+1], gpu[2*k], gpu[2*k+1])?;
+            }
+        }
         let mut worst=0.0f32;
         for f in 0..bb {
             let mut r = input[f*n..(f+1)*n].to_vec();
