@@ -253,11 +253,40 @@ fn main() -> Result<()> {
         b.synchronize().map_err(|e| anyhow!("sync ev: {e}"))?;
         ts_c.push(a.elapsed_ms(&b).map_err(|e| anyhow!("el: {e}"))? as f64 * 1e-3);
     }
-    let _ = Instant::now();
+    // ---- Unified host wall-clock timing (ONE std::time::Instant for all
+    // three) -- eliminates the cuda-core-vs-cudarc EVENT-API confound that the
+    // event loop above carries (oxide is timed on cuda-core events, nvcc/cuFFT
+    // on cudarc events, in separate contexts). Here every kernel is timed by
+    // the same host clock: sync the stream, start the timer, launch, sync, stop.
+    // At large batch the kernel time dwarfs launch+sync overhead, so this ratio
+    // is essentially pure GPU time measured identically across all three. ----
+    let (mut hs_o, mut hs_n, mut hs_c) = (Vec::new(), Vec::new(), Vec::new());
+    for _ in 0..TRIALS {
+        core_stream.synchronize()?;
+        let t = Instant::now();
+        run_oxide(&o_in, &o_w, &mut o_out)?;
+        core_stream.synchronize()?;
+        hs_o.push(t.elapsed().as_secs_f64());
+
+        cu_stream.synchronize().map_err(|e| anyhow!("sync: {e}"))?;
+        let t = Instant::now();
+        run_nvcc(&n_in, &n_w, &mut n_out)?;
+        cu_stream.synchronize().map_err(|e| anyhow!("sync: {e}"))?;
+        hs_n.push(t.elapsed().as_secs_f64());
+
+        cu_stream.synchronize().map_err(|e| anyhow!("sync: {e}"))?;
+        let t = Instant::now();
+        c_plan.exec_c2c(&mut c_in, &mut c_out, FftDirection::Forward).map_err(|e| anyhow!("cufft: {e:?}"))?;
+        cu_stream.synchronize().map_err(|e| anyhow!("sync: {e}"))?;
+        hs_c.push(t.elapsed().as_secs_f64());
+    }
 
     let o_us = median(ts_o) * 1e6 / batch as f64;
     let n_us = median(ts_n) * 1e6 / batch as f64;
     let c_us = median(ts_c) * 1e6 / batch as f64;
+    let ho_us = median(hs_o) * 1e6 / batch as f64;
+    let hn_us = median(hs_n) * 1e6 / batch as f64;
+    let hc_us = median(hs_c) * 1e6 / batch as f64;
     println!("N=256 batch={batch}  (per-FFT us; lower is better)");
     println!("  cuda-oxide : {o_us:.5} us");
     println!("  nvcc       : {n_us:.5} us");
@@ -265,5 +294,12 @@ fn main() -> Result<()> {
     println!("  oxide/nvcc : {:.3}  ({})", o_us / n_us, if o_us < n_us { "OXIDE BEATS NVCC" } else { "nvcc faster" });
     println!("  oxide/cuFFT: {:.3}", o_us / c_us);
     println!("  nvcc/cuFFT : {:.3}", n_us / c_us);
+    println!("  -- unified host clock (one std::Instant, all three) --");
+    println!("  host cuda-oxide : {ho_us:.5} us");
+    println!("  host nvcc       : {hn_us:.5} us");
+    println!("  host cuFFT      : {hc_us:.5} us");
+    println!("  host oxide/nvcc : {:.3}  ({})", ho_us / hn_us, if ho_us < hn_us { "OXIDE BEATS NVCC" } else { "nvcc faster" });
+    println!("  host oxide/cuFFT: {:.3}", ho_us / hc_us);
+    println!("  host nvcc/cuFFT : {:.3}", hn_us / hc_us);
     Ok(())
 }
