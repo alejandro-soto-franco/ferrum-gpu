@@ -23,6 +23,9 @@ use cudarc::driver::CudaContext as CudarcContext;
 
 use ferrum_gpu_fft::Plan;
 
+/// CPU interleaved-vs-split layout harness (split-radix FFT + elementwise).
+pub mod cpu_layout;
+
 /// Target log2(N) for the three bench sizes (256, 1024, 4096).
 pub const LOG_NS: &[u32] = &[8, 10, 12];
 /// Batch size used at every bench size.

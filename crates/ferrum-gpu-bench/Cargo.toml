@@ -12,6 +12,8 @@ cuda-device = { workspace = true }
 cuda-host = { workspace = true }
 cudarc = { version = "0.19", default-features = false, features = ["std", "driver", "cufft", "nvrtc", "cuda-13010", "dynamic-loading"] }
 ferrum-gpu-fft = { workspace = true }
+rustfft = "6"
+wide = "0.7"
 
 [lib]
 name = "ferrum_gpu_bench"
