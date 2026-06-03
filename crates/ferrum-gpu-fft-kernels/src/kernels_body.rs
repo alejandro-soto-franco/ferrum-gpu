@@ -1039,6 +1039,18 @@ mod kernels {
         let lane_off = blk * N * 2; // global f32 offset for this FFT
         let in_ptr = in_data.as_ptr();
 
+        // Shared-slot swizzle: a same-size bijection on the complex index that
+        // breaks the transpose bank conflicts WITHOUT growing the buffer (so no
+        // occupancy hit, unlike padding). Within each 16-complex block it
+        // rotates the low nibble by the high bits: sw(c) = 16*(c>>4) +
+        // ((c + (c>>4)) & 15). The worst access (stage-0 scatter, complex
+        // 16*tid+q -> all on bank 2q, 32-way) becomes bank 2*((q+tid)&15) =
+        // all 16 even banks distinct. Applied to every SHARED access (both
+        // sides of each transpose use the same sw, so the Stockham data flow is
+        // unchanged); global IO is left identity. SM SOL is only ~22%, so the
+        // extra shift/add per access is free.
+        macro_rules! sw { ($c:expr) => {{ let c = $c; let h = c >> 4; (h << 4) | (((c & 15) + h) & 15) }}; }
+
         macro_rules! dft8 {
             ($x0:expr,$x1:expr,$x2:expr,$x3:expr,$x4:expr,$x5:expr,$x6:expr,$x7:expr,
              $x8:expr,$x9:expr,$x10:expr,$x11:expr,$x12:expr,$x13:expr,$x14:expr,$x15:expr) => {{
@@ -1082,7 +1094,7 @@ mod kernels {
                         let pc: u64 = unsafe { *(in_ptr.add(s) as *const u64) };
                         (f32::from_bits(pc as u32), f32::from_bits((pc >> 32) as u32))
                     } else {
-                        let s = 2*c;
+                        let s = 2*sw!(c);
                         unsafe { (BUF[s], BUF[s+1]) }
                     }
                 }}; }
@@ -1146,7 +1158,7 @@ mod kernels {
                         let p = unsafe { out_data.get_unchecked_mut(d) as *mut f32 as *mut u64 };
                         unsafe { *p = packed; }
                     } else {
-                        let d = 2*c;
+                        let d = 2*sw!(c);
                         unsafe { BUF[d]=$re; BUF[d+1]=$im; }
                     }
                 }}; }

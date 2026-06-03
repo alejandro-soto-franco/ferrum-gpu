@@ -158,3 +158,24 @@ Remaining headroom: at small batch the kernel is occupancy-bound (47%); stage-0
 global gather is scalar ld (could go u64/v4); residual bank conflicts in the two
 transposes (~1850/block). But the headline holds: near-parity, occasionally
 winning, vs r16s's 1.4x.
+
+## Final: same-size XOR swizzle -> DRAM-bound, cuFFT parity
+
+The four-step at throughput was BOTH DRAM-bound (80%) and shared-bound (L1TEX
+84%), with 1890 bank-conflicts/block in the transposes (worst: stage-0 scatter,
+complex 16*tid+q -> all on bank 2q, 32-way). SM was only 22% -> free ALU.
+
+Added a same-size shared-slot swizzle (NOT padding, so no occupancy loss):
+`sw(c) = 16*(c>>4) + ((c + (c>>4)) & 15)` -- a bijection that rotates the low
+nibble of each 16-complex block by its high bits, applied to every shared
+access (both sides of each transpose use the same sw, so the data flow is
+unchanged); global IO stays identity.
+
+Effect: L1TEX 84% -> 74%, DRAM 80% -> 87.6% (now DRAM-bound, approaching cuFFT's
+~90% roofline). Ratio vs cuFFT: 1.09-1.18 -> **1.01-1.045** (16384/32768 stable
+at ~1.04, 4096 ~1.01). Correct 4.88e-4, race-free, 35/35 wheel tests green.
+
+This is cuFFT PARITY within ~4% (clock noise), DRAM-bound like cuFFT. The
+register four-step + this swizzle close the 4096 gap that the radix-16 r16s
+kernel (1.4x, shared-bound) could not. Lesson: on Blackwell, deconflict shared
+with a same-SIZE bijection, never padding (padding's occupancy loss dominates).
