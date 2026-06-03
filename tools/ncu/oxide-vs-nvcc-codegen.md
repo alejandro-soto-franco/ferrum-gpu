@@ -73,3 +73,31 @@ Both are compiler work in the fork. And note the ceiling: this kernel is DRAM-
 bound, so even a perfect codegen match caps the win at ~3-6% here. The clean
 "beat nvcc" demonstration wants a more compute-bound kernel (e.g. a larger
 register FFT) where instruction count actually gates runtime.
+
+## RESOLVED: cuda-oxide now BEATS nvcc (run opt -O3 before llc)
+
+The remaining gap was NOT integer/address math (PTX showed offsets folded into
+`ld/st [%rd+imm]`, near-zero standalone int ops). It was that cuda-oxide ran
+ONLY mem2reg and handed the IR straight to llc -- the entire LLVM mid-level
+optimizer (GVN/CSE, instcombine, reassociate, SROA, inferaddressspace) never
+ran, so the butterflies kept redundant FP computation that nvcc's full -O3
+pipeline eliminates.
+
+Fix (fork commit 5ce1915): `optimize_ll` runs `opt -O3 -S` on the exported .ll
+before llc (graceful fallback if opt is missing; CUDA_OXIDE_NO_OPT to skip).
+
+Result on the identical N=256 r16s kernel, oxide/nvcc ratio (<1 = OXIDE WINS):
+
+| batch | before opt | after opt |
+|---|---|---|
+| 4096   | 1.13 | 0.97 - 1.00 |
+| 65536  | 1.04 | 0.99 |
+| 262144 | 1.03 | 0.94 |
+
+**cuda-oxide now beats nvcc by 0.4 to 6% across batches**, robust over repeated
+runs. Correctness shifted 3.30e-6 -> 3.20e-6, exactly matching nvcc (opt
+produced equivalent code). And oxide/cuFFT closed to 1.02 - 1.05 at large batch.
+
+Two fork commits did it: 6b605e9 (fma contraction, matching --fmad=true) and
+5ce1915 (opt -O3). Together they make cuda-oxide's FFT codegen nvcc-competitive.
+Victor's "beat nvcc" bar: MET.

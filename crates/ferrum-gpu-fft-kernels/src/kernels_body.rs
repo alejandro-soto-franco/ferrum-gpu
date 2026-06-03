@@ -1076,8 +1076,11 @@ mod kernels {
                 macro_rules! g { ($p:expr) => {{
                     let c = src_base + ($p)*NR;
                     if $g_glob {
+                        // One coalesced u64 (re|im) per complex instead of two
+                        // scalar loads.
                         let s = lane_off + 2*c;
-                        unsafe { (*in_ptr.add(s), *in_ptr.add(s+1)) }
+                        let pc: u64 = unsafe { *(in_ptr.add(s) as *const u64) };
+                        (f32::from_bits(pc as u32), f32::from_bits((pc >> 32) as u32))
                     } else {
                         let s = 2*c;
                         unsafe { (BUF[s], BUF[s+1]) }
@@ -1137,8 +1140,11 @@ mod kernels {
                 macro_rules! s { ($q:expr,$re:expr,$im:expr) => {{
                     let c = dst_base + ($q)*m_r;
                     if $s_glob {
+                        // One coalesced u64 store (re|im) per complex.
                         let d = lane_off + 2*c;
-                        unsafe { *out_data.get_unchecked_mut(d)=$re; *out_data.get_unchecked_mut(d+1)=$im; }
+                        let packed: u64 = ($re.to_bits() as u64) | (($im.to_bits() as u64) << 32);
+                        let p = unsafe { out_data.get_unchecked_mut(d) as *mut f32 as *mut u64 };
+                        unsafe { *p = packed; }
                     } else {
                         let d = 2*c;
                         unsafe { BUF[d]=$re; BUF[d+1]=$im; }
