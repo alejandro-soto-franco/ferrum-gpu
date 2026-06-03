@@ -1,8 +1,17 @@
 .PHONY: check test test-gpu example-vector-add example-vector-add-oxide example-fft kernel-cross-check bench develop wheel pytest verify-all fmt clippy clean
 
-# cuda-oxide-codegen-backend RUSTFLAGS used by maturin when building the
-# Python cdylib. Mirrors what cargo-oxide sets internally for `cargo oxide run/build`.
-FERRUM_GPU_RUSTFLAGS = -Z codegen-backend=$(HOME)/.cargo/cuda-oxide/librustc_codegen_cuda.so -C opt-level=3 -C debug-assertions=off -Z mir-enable-passes=-JumpThreading -Csymbol-mangling-version=v0
+# cuda-oxide codegen backend that maturin drives when building the Python
+# cdylib. We point at the personal fork's backend
+# (github.com/alejandro-soto-franco/cuda-oxide) rather than the stale standalone
+# at ~/.cargo/cuda-oxide: the fork carries the fail-loud miscompile fixes and
+# correctly lowers the kernels the wheel ships (u64-coalesced IO, f32::from_bits,
+# mul_add). Build it with `cd ~/cuda-oxide/crates/rustc-codegen-cuda && cargo build`.
+# Override FERRUM_GPU_BACKEND to use a different .so.
+FERRUM_GPU_BACKEND ?= $(HOME)/cuda-oxide/crates/rustc-codegen-cuda/target/debug/librustc_codegen_cuda.so
+
+# RUSTFLAGS used by maturin when building the Python cdylib. Mirrors what
+# cargo-oxide sets internally for `cargo oxide run/build`.
+FERRUM_GPU_RUSTFLAGS = -Z codegen-backend=$(FERRUM_GPU_BACKEND) -C opt-level=3 -C debug-assertions=off -Z mir-enable-passes=-JumpThreading -Csymbol-mangling-version=v0
 
 # Activate the Plan 4 venv before any python invocation.
 VENV = $(HOME)/.venvs/ferrum-gpu

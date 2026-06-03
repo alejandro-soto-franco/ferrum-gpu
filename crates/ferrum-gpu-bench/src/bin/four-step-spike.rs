@@ -45,7 +45,8 @@ fn launch(
     d_w4096: &DeviceBuffer<f32>,
     d_out: &mut DeviceBuffer<f32>,
 ) -> Result<()> {
-    let cfg = LaunchConfig { grid_dim: (batch as u32, 1, 1), block_dim: (1024, 1, 1), shared_mem_bytes: 0 };
+    let block: u32 = std::env::var("FOURSTEP_BLOCK").ok().and_then(|s| s.parse().ok()).unwrap_or(1024);
+    let cfg = LaunchConfig { grid_dim: (batch as u32, 1, 1), block_dim: (block, 1, 1), shared_mem_bytes: 0 };
     module.fft_c2c_4096_4step(stream, cfg, d_in, d_w64, d_w4096, d_out)?;
     Ok(())
 }
@@ -97,8 +98,8 @@ fn main() -> Result<()> {
         }
     }
 
-    // --- Timing at batch=256, alternating vs cuFFT ---
-    let batch = 256;
+    // --- Timing (batch from FOURSTEP_BATCH, default 256), alternating vs cuFFT ---
+    let batch: usize = std::env::var("FOURSTEP_BATCH").ok().and_then(|s| s.parse().ok()).unwrap_or(256);
     let total = N * batch;
     let input: Vec<f32> = (0..total * 2).map(|i| (i as f32 * 0.001).sin()).collect();
     let d_in = DeviceBuffer::from_host(&stream, &input)?;

@@ -19,11 +19,13 @@ mod four_step {
     use ::cuda_device::cooperative_groups::{ThreadGroup, WarpCollective, this_thread_block};
     use ::cuda_device::{DisjointSlice, SharedArray, kernel, thread};
 
-    const NW: usize = 32; // warps per block (block_dim = 1024, the CUDA max):
-    // 64 columns / 32 warps = 2 waves per pass, vs 8 with 256 threads.
-    const BLOCK_THREADS: usize = NW * 32;
+    // Block size is set by the launch (block_dim.x = a multiple of 32 that
+    // divides 64). Warps-per-block (`nw`) and threads-per-block (`bt`) are read
+    // at runtime so the host can sweep occupancy (128, 256, 512, 1024) without
+    // recompiling: more warps = fewer waves per pass but lower occupancy at the
+    // 33 KiB shared footprint.
 
-    /// 1D forward C2C FFT, N=4096, one block per transform, 256 threads.
+    /// 1D forward C2C FFT, N=4096, one block per transform.
     ///
     /// `w64`: `W_64^e`, e in 0..32 (32 complex, interleaved).
     /// `w4096`: `W_4096^e`, e in 0..4096 (4096 complex, interleaved).
@@ -45,6 +47,8 @@ mod four_step {
         let warp = this_thread_block().tiled_partition::<32>();
         let lane = warp.thread_rank() as usize;
         let wib = (thread::threadIdx_x() / 32) as usize; // warp index in block
+        let nw = (thread::blockDim_x() / 32) as usize; // warps per block
+        let bt = thread::blockDim_x() as usize; // threads per block
         let blk = thread::blockIdx_x() as usize;
         let base = blk * 4096 * 2;
 
@@ -63,7 +67,7 @@ mod four_step {
                     BUF[p] = in_data[base + 2 * t];
                     BUF[p + 1] = in_data[base + 2 * t + 1];
                 }
-                t += BLOCK_THREADS;
+                t += bt;
             }
         }
         thread::sync_threads();
@@ -156,7 +160,7 @@ mod four_step {
                     BUF[o1] = c1r;
                     BUF[o1 + 1] = c1i;
                 }
-                col += NW;
+                col += nw;
             }
         }
         thread::sync_threads();
@@ -186,7 +190,7 @@ mod four_step {
                     *out_data.get_unchecked_mut(ob) = e1r;
                     *out_data.get_unchecked_mut(ob + 1) = e1i;
                 }
-                row += NW;
+                row += nw;
             }
         }
     }

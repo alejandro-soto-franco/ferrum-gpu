@@ -21,36 +21,28 @@ cd /work/crates/ferrum-gpu-py
 # FFT with DriverError(218). sm_* targets map the ISA version correctly.
 export CUDA_OXIDE_TARGET="${CUDA_OXIDE_TARGET:-sm_80}"
 
-# Bootstrap the cuda-oxide codegen backend here, at `docker run` time, rather
-# than in the Dockerfile. cargo-oxide is dynamically linked against
-# libcuda.so.1, which is NOT present at image-build time (the build container
-# has no NVIDIA driver), so a `cargo oxide setup` baked into the image fails to
-# even start the binary. The CUDA Toolkit ships a stub libcuda for link/load
-# purposes; pointing the loader at it lets cargo-oxide run and compile the
-# backend (.so lands in /root/.cargo/cuda-oxide/). No GPU is needed for the
-# compile. Crucially this runs BEFORE RUSTFLAGS is set: the backend must be
-# built with the default codegen backend, not with a `-Z codegen-backend=`
-# flag pointing at the .so we are about to create.
-# `cargo oxide setup` must run from inside a cuda-oxide project, and it both
-# builds and discovers the backend .so at cwd/target. It cannot run in /work
-# (the workspace's /work/target is the dangling host cargo-targets symlink,
-# ENOTDIR) and CARGO_TARGET_DIR does not help (setup discovers at cwd/target
-# regardless). So scaffold a throwaway project under /tmp, which has a real,
-# writable target, and run setup there; it installs the backend globally to
-# /root/.cargo/cuda-oxide/librustc_codegen_cuda.so.
-if [ ! -f /root/.cargo/cuda-oxide/librustc_codegen_cuda.so ]; then
-    STUBS=/usr/local/cuda/lib64/stubs
-    [ -e "$STUBS/libcuda.so.1" ] || ln -sf "$STUBS/libcuda.so" "$STUBS/libcuda.so.1"
-    echo "Bootstrapping cuda-oxide codegen backend (stub libcuda)…"
-    rm -rf /tmp/oxide-bootstrap
-    ( cd /tmp && LD_LIBRARY_PATH="$STUBS:${LD_LIBRARY_PATH:-}" cargo oxide new oxide-bootstrap )
-    ( cd /tmp/oxide-bootstrap && LD_LIBRARY_PATH="$STUBS:${LD_LIBRARY_PATH:-}" cargo oxide setup )
+# The cdylib links libcuda.so.1 (NEEDED) but the build container has no NVIDIA
+# driver. The CUDA Toolkit ships a stub libcuda for link purposes; expose it as
+# libcuda.so.1 so maturin's link step resolves it. No GPU is needed to BUILD
+# (the runtime driver provides the real libcuda when the wheel is used).
+STUBS=/usr/local/cuda/lib64/stubs
+[ -e "$STUBS/libcuda.so.1" ] || ln -sf "$STUBS/libcuda.so" "$STUBS/libcuda.so.1"
+export LD_LIBRARY_PATH="$STUBS:${LD_LIBRARY_PATH:-}"
+
+# The personal fork's codegen backend is pre-built into the image (see
+# Dockerfile.manylinux, which clones github.com/alejandro-soto-franco/cuda-oxide
+# and builds crates/rustc-codegen-cuda). Fail loudly if it is missing rather
+# than silently falling back to a different backend.
+BACKEND=/root/.cargo/cuda-oxide/librustc_codegen_cuda.so
+if [ ! -f "$BACKEND" ]; then
+    echo "error: fork codegen backend missing at $BACKEND" >&2
+    echo "       rebuild the image from Dockerfile.manylinux." >&2
+    exit 1
 fi
 
-# RUSTFLAGS that cargo-oxide sets internally for builds that drive its
-# codegen backend. Identical to what cargo oxide run sets. Set AFTER the
-# backend bootstrap above.
-export RUSTFLAGS="-Z codegen-backend=/root/.cargo/cuda-oxide/librustc_codegen_cuda.so -C opt-level=3 -C debug-assertions=off -Z mir-enable-passes=-JumpThreading -Csymbol-mangling-version=v0"
+# RUSTFLAGS that drive maturin through the fork's codegen backend. Identical to
+# what `cargo oxide run` sets internally, and to the local Makefile path.
+export RUSTFLAGS="-Z codegen-backend=$BACKEND -C opt-level=3 -C debug-assertions=off -Z mir-enable-passes=-JumpThreading -Csymbol-mangling-version=v0"
 
 echo "Building wheel with CUDA_OXIDE_TARGET=$CUDA_OXIDE_TARGET"
 

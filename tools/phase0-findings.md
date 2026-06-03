@@ -130,6 +130,31 @@ therefore unreachable from Rust source on this backend; ~10-20% left on the
 table. Tracked as an upstream codegen gap alongside the no-auto-FMA and
 array-in-local-memory issues.
 
+> **CORRECTION (2026-06-02): the above is STALE — `f32::mul_add` works.** At the
+> pinned rev `6ed9938`, cuda-oxide lowers the Rust FMA intrinsics to libdevice:
+> `mir-lower/src/convert/ops/call.rs:271` maps `FmaF32 | FmuladdF32 ->
+> "__nv_fmaf"` (and `FmaF64 | FmuladdF64 -> "__nv_fma"`). Chain:
+> `f32::mul_add` -> `core::intrinsics::fmaf32` -> `__nv_fmaf`, which NVVM links +
+> inlines to a single `fma.rn.f32` (cuda-oxide compiles via NVVM/libdevice).
+> The original failure was almost certainly `__nv_fmaf` going unlinked in a
+> kernel that used no other libdevice function, not a missing lowering.
+> VERIFIED: a `mul_add` probe in the `vector-add-cuda-oxide` kernel compiled,
+> JIT-linked, and verified 1,048,576 elements (`a*2+b`) correctly. So FMA is
+> reachable in 100% pure compiler-lowered Rust (`re*wr - im*wi` ->
+> `re.mul_add(wr, -(im*wi))`); the ~10-20% is NOT codegen-blocked. No `asm!`,
+> no fork.
+>
+> **IMPORTANT CAVEAT (added after testing): this is true ONLY for the
+> `cargo oxide` git-dep backend (rev 6ed9938).** The shipped WHEEL is built by
+> `maturin` with a SEPARATE STANDALONE backend
+> `~/.cargo/cuda-oxide/librustc_codegen_cuda.so`, which is OLDER and does NOT
+> lower `mul_add` — it silently emits an empty PTX bundle, so `pytest` fails
+> 29x with "load_kernels: bundle has no Ptx payload". So `mul_add` in the
+> shipped kernels (kernels_body.rs) breaks `pip install` until that standalone
+> backend is rebuilt to match 6ed9938. The two cuda-oxide installs disagree —
+> this is a real shipping footgun. The warp/spike artefacts use `mul_add` and
+> work because they only build via `cargo oxide`, never the wheel.
+
 Status: codegen-level spill recovery is done (the cuda-oxide-is-bad-at-PTX
 hypothesis is confirmed and largely mitigated at source level). Remaining
 ~3.8x is FMA (codegen-blocked) + structural (1 FFT/block, 3 barriers/run,
@@ -327,6 +352,116 @@ profiler-guided redesign tracked in the four-step notes), but every
 specialised size now beats its radix-2 fallback by 2-5x. The shared-memory
 radix-R Stockham family (scalarized, inline butterfly macro, single buffer) is
 the established winning pattern.
+
+## N=256 warp-per-FFT redesign (2026-06-02): profiler REFUTES the approach
+
+Built `fft_c2c_256_warp` (`fft256_warp_body.rs`): one warp = one 256-pt FFT,
+256 = 32x8, register-resident (in-register dft8 + W_256 twiddle + 8-wide 32-pt
+warp shfl), zero shared / zero syncthreads, pure-Rust `mul_add` FMA. Correct:
+max_rel_err 3.08e-5 vs radix-2 (CPU oracle `warp256_model` = four_step_model
+N1=32,N2=8). Spike `fft256-warp-spike`; alternating gate `perf-gate-warp256`
+(env `WARP_BLOCK` sweeps K = warps/block).
+
+Result (unlocked, alternating vs cuFFT): ratio is BEST at K=1 (2.15x) and gets
+monotonically WORSE with more warps/block (K=8 -> 2.66x, K=32 -> 5.29x). So the
+"multiple FFTs per block" lever HURTS here. Worse than the existing radix-4
+(1.32x).
+
+ncu (K=1, sudo via zenity askpass): **40 reg/thread** (not register-bound),
+**17% achieved occupancy**, **0.41 waves/SM**, 10.69 us. The bottleneck is
+GRID STARVATION, not register pressure: at batch=256 a warp-per-FFT launches
+only 256 warps (32 threads/FFT) = 0.41 of one wave -> the grid does not fill
+the GPU once. More K -> fewer blocks -> even smaller grid -> worse.
+
+DECISIVE INVERSION: at this tiny, latency-bound batch the spec's premise is
+backwards. You want MORE threads/FFT (more warps in flight), not fewer. radix-4
+wins (1.32x) precisely because it uses 64 threads/FFT (2 warps -> 512 warps,
+2x the parallelism of warp-per-FFT's 256). cuFFT's vector_fft likewise.
+
+DECISION: warp-per-FFT is NOT the path to beat cuFFT at N=256 (kept as a
+documented research artifact; correct, not wired). The profiler-indicated
+levers instead:
+  1. FMA the EXISTING radix-4 fft_c2c_256 butterflies (`mul_add`, now proven to
+     work) — certain ~10-20%, brings 1.32x toward ~1.1-1.2x. Lowest risk.
+  2. radix-16 shared kernel (256 = 16x16, 2 stages = 1 barrier vs radix-4's 4
+     stages/3 barriers), MORE threads/FFT, FMA'd — attacks barriers AND raises
+     warps-in-flight, the two things the profiler says matter here.
+  3. Caveat (per the earlier nvcc-ceiling note): beating cuFFT at a latency-
+     bound tiny batch is research-grade and may be infeasible.
+
+### FMA lever measured (2026-06-02): perf-NEUTRAL at batch=256
+
+Applied `mul_add` FMA to the radix-4 `tw!` twiddle multiplies in
+`fft_c2c_256/1024/4096` (the only complex multiplies; the radix-4/8 DFT bodies
+are add/sub). Correct (example 8/8). Also fixed a latent bug it surfaced: the
+radix-2 fallback's two `SharedArray<f32, 8192>` = 64 KiB static shared exceeds
+the 48 KiB sm_120 limit; it had been linking only on a lucky nvJitLink LTO
+carveout, and FMA-ing the specialised kernels shifted that carveout to 48 KiB.
+Resized to `<f32, 4096>` (32 KiB; fallback max is N=2048 since 256/1024/4096 are
+always specialised).
+
+A/B under locked 1500 MHz (median of 4, ratio vs cuFFT), driver 595:
+
+| N    | non-FMA | FMA  | verdict |
+| ---- | ------- | ---- | ------- |
+| 256  | ~1.55   | ~1.51 | within noise |
+| 1024 | ~1.9    | ~2.06 | within noise |
+| 4096 | ~3.60   | ~3.68 | within noise |
+
+`ferrum_us` at 256 is unchanged (~0.035). FMA buys ~nothing here: at batch=256
+these kernels are latency/occupancy/memory-bound (0.41 waves/SM; cf. the warp
+finding above), NOT ALU-bound, so the saved twiddle multiplies hide behind
+memory+sync latency. The phase0 "~10-20% left on the table" estimate was for an
+ALU-saturated regime, not this tiny-batch latency-bound one.
+
+**FMA REVERTED from kernels_body (the shipped kernels).** Beyond being
+perf-neutral, `mul_add` in kernels_body BREAKS THE WHEEL: `maturin` builds the
+Python module with the older standalone backend (see the §FMA caveat above),
+which doesn't lower `mul_add` -> empty PTX bundle -> `pytest` 29x errors with
+"bundle has no Ptx payload". Verified: non-FMA = pytest 29/29 PASS; FMA = 29
+errors. So FMA is off the table for the shipped kernels until the standalone
+backend is rebuilt to match rev 6ed9938. The **fallback shared resize
+(64->32 KiB) is KEPT** — it's FMA-independent, a genuine latent-bug fix, and
+passes pytest 29/29 + example 8/8.
+
+NOTE: driver 595 moved the N=256 baseline from phase0's 1.32x (driver 580,
+1500 MHz) to ~1.55x — cuFFT got relatively faster; always A/B within one driver.
+
+### radix-16 lever (2026-06-02): blocked by codegen + predicted occupancy loss
+
+Profiled the production radix-4 fft_c2c_256 (1.55x): 31 reg/thread, **0.41
+waves/SM, 40% occupancy, compute SOL 26%, memory SOL 45%** — confirms the
+radix family is ALSO grid-starved/latency-bound at batch=256 (GPU <half busy,
+neither SOL near peak). This motivated radix-16 (256=16x16, 2 barriers vs
+radix-4's 4) — the barrier trend favours it (radix-2 8-barrier 6.34x ->
+radix-4 4-barrier 1.55x). BUT radix-16 has only 16 butterflies/FFT -> 16
+threads/FFT -> ~256 warps total = the SAME ceiling the warp kernel starved at
+(0.41 waves). So it trades radix-4's 2x occupancy for half the barriers.
+
+Attempted (`fft256_r16_body.rs`, dft16 = two dft8 + W_16 combine, W_256-table
+twiddles): cuda-oxide REJECTED it — "PTX generation failed: invalid input
+program". Cause: runtime-indexed `[f32;N]` arrays + `const [(f32,f32);8]` +
+loops; cuda-oxide needs full scalarisation into named registers (as the
+existing kernels do). Compiling radix-16 needs a ~150-line hand-unroll
+(16 gathers, 15 twiddles, scalarised dft16, 16 scatters). NOT done: predicted
+to lose on the 256-warp occupancy ceiling (same condition that sank the warp
+kernel at 2.15x), so the scalarisation cost is not justified by the likely
+outcome. Files removed; revisit only if attacking a larger batch.
+
+### Standing conclusion (2026-06-02)
+
+Three levers explored for beating cuFFT at N=256, all REFUTED or predicted-loss:
+(1) warp-per-FFT — grid-starved (0.41 waves, 2.15x); (2) FMA — perf-neutral
+(latency-bound, not ALU-bound); (3) radix-16 — codegen-blocked + the same
+occupancy ceiling as (1). The radix family is U-shaped with the optimum already
+at radix-4: radix-2 (more threads) loses to barriers, radix-16 (fewer threads)
+loses to occupancy. The root cause is structural: at batch=256, N=256 there is
+not enough work to fill the GPU (0.41 waves on EVERY kernel tried), so the
+regime is latency-bound and cuFFT's hand-tuned `vector_fft` wins. Beating cuFFT
+here is research-grade and likely infeasible WITHOUT changing the regime —
+the parallelism only exists at large batch (e.g. 4096+), where the
+"multiple-FFTs-per-block" and FMA theses should actually hold. Recommended next
+direction if pursued: measure the warp/FMA kernels at batch >= 4096.
 
 ## Phase 0 summary
 

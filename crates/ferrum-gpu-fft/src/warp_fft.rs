@@ -154,6 +154,20 @@ pub fn four_step_model(input: &[Complex32], log_n1: u32, log_n2: u32) -> Vec<Com
     out
 }
 
+/// CPU model of the N=256 warp-per-FFT kernel (`fft_c2c_256_warp`): the
+/// four-step decomposition `256 = 32 x 8` (N1=32 the warp/lane dimension,
+/// N2=8 the in-register dimension). Executable spec for the GPU kernel's lane
+/// layout and output ordering:
+///   * lane L holds 8 inputs `x[L + 32*n2]`, `n2 in 0..8`;
+///   * step 1: in-register 8-pt DFT over n2 -> `B[L][k2]`;
+///   * step 2: twiddle `B[L][k2] *= W_256^(L*k2)`;
+///   * step 3: 32-pt warp DFT over the lane dimension for each k2 -> X;
+///   * output `X[8*k1 + k2]` (k1 = lane after the warp transform).
+/// Verified against the radix-2 reference in tests.
+pub fn warp256_model(input: &[Complex32]) -> Vec<Complex32> {
+    four_step_model(input, 5, 3)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,6 +241,33 @@ mod tests {
             assert!(
                 err / scale < 1e-3,
                 "bin {k}: four-step {:?} vs radix-2 {:?}",
+                got[k],
+                reference[k]
+            );
+        }
+    }
+
+    #[test]
+    fn warp256_matches_radix2_reference() {
+        // Asymmetric four-step (N1=32 != N2=8) — the layout the GPU
+        // fft_c2c_256_warp kernel implements. Not covered by the 64x64 test.
+        let n = 256usize;
+        let input: Vec<Complex32> = (0..n)
+            .map(|i| Complex32::new((i as f32 * 0.013).sin(), (i as f32 * 0.021).cos()))
+            .collect();
+        let mut reference = input.clone();
+        Plan::new(8, 1, false).cpu_execute(&mut reference, Direction::Forward);
+
+        let got = warp256_model(&input);
+        for k in 0..n {
+            let err = ((got[k].re - reference[k].re).powi(2)
+                + (got[k].im - reference[k].im).powi(2))
+            .sqrt();
+            let scale =
+                (reference[k].re * reference[k].re + reference[k].im * reference[k].im).sqrt().max(1.0);
+            assert!(
+                err / scale < 1e-3,
+                "bin {k}: warp256 {:?} vs radix-2 {:?}",
                 got[k],
                 reference[k]
             );
