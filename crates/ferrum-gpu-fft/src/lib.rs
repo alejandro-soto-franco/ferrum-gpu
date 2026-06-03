@@ -15,6 +15,7 @@ pub mod cpu;
 pub mod cpu_2d;
 pub mod cpu_radix4;
 pub mod cpu_radix8;
+pub mod layout_study;
 pub mod plan;
 pub mod twiddles;
 pub mod warp_fft;
