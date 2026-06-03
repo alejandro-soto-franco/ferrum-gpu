@@ -1599,4 +1599,66 @@ mod kernels {
         thread::sync_threads();
         stage!(256, 1, true, false, true); // shared -> scatter global
     }
+
+    /// Interleaved complex pointwise multiply: out = a * b, layout [re,im,...].
+    /// Launch flat: grid=(ceil(n/256),1,1), block=(256,1,1), n = element count.
+    #[kernel]
+    pub fn cmul_interleaved(a: &[f32], b: &[f32], mut out: DisjointSlice<f32>) {
+        let i = (thread::blockIdx_x() as usize) * (thread::blockDim_x() as usize)
+            + thread::threadIdx_x() as usize;
+        let base = 2 * i;
+        if base + 1 < a.len() {
+            let (ar, ai) = (a[base], a[base + 1]);
+            let (br, bi) = (b[base], b[base + 1]);
+            unsafe {
+                *out.get_unchecked_mut(base) = ar * br - ai * bi;
+                *out.get_unchecked_mut(base + 1) = ar * bi + ai * br;
+            }
+        }
+    }
+
+    /// Split complex pointwise multiply: out = a * b, SoA (two streams each).
+    #[kernel]
+    pub fn cmul_split(
+        a_re: &[f32], a_im: &[f32], b_re: &[f32], b_im: &[f32],
+        mut o_re: DisjointSlice<f32>, mut o_im: DisjointSlice<f32>,
+    ) {
+        let i = (thread::blockIdx_x() as usize) * (thread::blockDim_x() as usize)
+            + thread::threadIdx_x() as usize;
+        if i < a_re.len() {
+            let (ar, ai) = (a_re[i], a_im[i]);
+            let (br, bi) = (b_re[i], b_im[i]);
+            unsafe {
+                *o_re.get_unchecked_mut(i) = ar * br - ai * bi;
+                *o_im.get_unchecked_mut(i) = ar * bi + ai * br;
+            }
+        }
+    }
+
+    /// out_re/out_im <- interleaved in: the deinterleave a split backend pays
+    /// before handing data to an interleaved-native transform.
+    #[kernel]
+    pub fn deinterleave(inp: &[f32], mut o_re: DisjointSlice<f32>, mut o_im: DisjointSlice<f32>) {
+        let i = (thread::blockIdx_x() as usize) * (thread::blockDim_x() as usize)
+            + thread::threadIdx_x() as usize;
+        if 2 * i + 1 < inp.len() {
+            unsafe {
+                *o_re.get_unchecked_mut(i) = inp[2 * i];
+                *o_im.get_unchecked_mut(i) = inp[2 * i + 1];
+            }
+        }
+    }
+
+    /// out <- interleaved(re, im): the reinterleave on the way back.
+    #[kernel]
+    pub fn interleave(re: &[f32], im: &[f32], mut out: DisjointSlice<f32>) {
+        let i = (thread::blockIdx_x() as usize) * (thread::blockDim_x() as usize)
+            + thread::threadIdx_x() as usize;
+        if i < re.len() {
+            unsafe {
+                *out.get_unchecked_mut(2 * i) = re[i];
+                *out.get_unchecked_mut(2 * i + 1) = im[i];
+            }
+        }
+    }
 }
