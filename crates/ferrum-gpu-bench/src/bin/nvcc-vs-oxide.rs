@@ -21,8 +21,8 @@ use ferrum_gpu_fft::{Complex32, Direction, Plan, twiddles_full_roots};
 
 include!("../../../ferrum-gpu-fft-kernels/src/kernels_body.rs");
 
-const WARMUP: usize = 50;
-const TRIALS: usize = 200;
+const WARMUP_DEFAULT: usize = 50;
+const TRIALS_DEFAULT: usize = 200;
 
 // CUDA C port of `fft_c2c_256_r16s` — bit-faithful to the Rust kernel:
 // 32 threads, __shared__ float BUF[512], u64-coalesced load, two radix-16
@@ -137,6 +137,10 @@ fn median(mut v: Vec<f64>) -> f64 {
 fn main() -> Result<()> {
     let (core_ctx, cudarc_ctx) = init_cuda_contexts()?;
     let batch: usize = std::env::var("NVCC_BATCH").ok().and_then(|s| s.parse().ok()).unwrap_or(4096);
+    // WARMUP/TRIALS are env-overridable so a profiler run (ncu) can do just the
+    // correctness gate plus a minimal tail instead of 50 + 400 timed launches.
+    let warmup: usize = std::env::var("WARMUP").ok().and_then(|s| s.parse().ok()).unwrap_or(WARMUP_DEFAULT);
+    let trials: usize = std::env::var("TRIALS").ok().and_then(|s| s.parse().ok()).unwrap_or(TRIALS_DEFAULT);
     let n = 256usize;
     let total = n * batch;
 
@@ -214,7 +218,7 @@ fn main() -> Result<()> {
     }
 
     // ---- Timing (median per-FFT us over TRIALS) ----
-    for _ in 0..WARMUP {
+    for _ in 0..warmup {
         run_oxide(&o_in, &o_w, &mut o_out)?;
         run_nvcc(&n_in, &n_w, &mut n_out)?;
         c_plan.exec_c2c(&mut c_in, &mut c_out, FftDirection::Forward).map_err(|e| anyhow!("cufft exec: {e:?}"))?;
@@ -225,7 +229,7 @@ fn main() -> Result<()> {
     let core_flag = Some(cuda_core::sys::CUevent_flags_enum_CU_EVENT_DEFAULT);
     let cu_flag = Some(cudarc::driver::sys::CUevent_flags::CU_EVENT_DEFAULT);
     let (mut ts_o, mut ts_n, mut ts_c) = (Vec::new(), Vec::new(), Vec::new());
-    for _ in 0..TRIALS {
+    for _ in 0..trials {
         // oxide (cuda-core events)
         let a = core_ctx.new_event(core_flag)?;
         let b = core_ctx.new_event(core_flag)?;
@@ -261,7 +265,7 @@ fn main() -> Result<()> {
     // At large batch the kernel time dwarfs launch+sync overhead, so this ratio
     // is essentially pure GPU time measured identically across all three. ----
     let (mut hs_o, mut hs_n, mut hs_c) = (Vec::new(), Vec::new(), Vec::new());
-    for _ in 0..TRIALS {
+    for _ in 0..trials {
         core_stream.synchronize()?;
         let t = Instant::now();
         run_oxide(&o_in, &o_w, &mut o_out)?;
