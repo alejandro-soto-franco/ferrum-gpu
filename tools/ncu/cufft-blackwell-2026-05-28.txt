@@ -1,6 +1,0 @@
-==PROF== Connected to process 3780309 (/home/cargo-targets/ferrum-gpu/release/cufft-ncu-trace)
-==ERROR== ERR_NVGPUCTRPERM - The user does not have permission to access NVIDIA GPU Performance Counters on the target device 0. For instructions on enabling permissions and to get more information see https://developer.nvidia.com/ERR_NVGPUCTRPERM
-ran cuFFT N=256 batch=256 x5
-ran cuFFT N=1024 batch=256 x5
-ran cuFFT N=4096 batch=256 x5
-==PROF== Disconnected from process 3780309
