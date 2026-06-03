@@ -152,7 +152,11 @@ fn run_fft_flat_with_device(
                     block_dim: (256, 1, 1),
                     shared_mem_bytes: 0,
                 };
-                module.fft_c2c_4096_r16s(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+                // Register-resident four-step: same radix-16 math and twiddle
+                // table as fft_c2c_4096_r16s but half the shared traffic, which
+                // takes N=4096 from ~1.4x cuFFT to near-parity (1.07-1.25x,
+                // occasionally winning) on sm_120. See tools/ncu/.
+                module.fft_c2c_4096_4step_reg(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
             }
         }
     } else {
