@@ -59,7 +59,11 @@ fn main() -> Result<()> {
     let mut d_out = DeviceBuffer::<f32>::zeroed(&stream, WARPS * N * 2)?;
 
     let grid = (WARPS as u32 * 32) / BLOCK; // total threads / block size
-    let cfg = LaunchConfig { grid_dim: (grid, 1, 1), block_dim: (BLOCK, 1, 1), shared_mem_bytes: 0 };
+    let cfg = LaunchConfig {
+        grid_dim: (grid, 1, 1),
+        block_dim: (BLOCK, 1, 1),
+        shared_mem_bytes: 0,
+    };
 
     module.warp_fft32(stream.as_ref(), cfg, &d_in, &d_tw, &mut d_out)?;
     let gpu = d_out.to_host_vec(&stream)?;
@@ -75,12 +79,17 @@ fn main() -> Result<()> {
         for k in 0..N {
             let (gr, gi) = (gpu[(w * N + k) * 2], gpu[(w * N + k) * 2 + 1]);
             let err = ((gr - lane[k].re).powi(2) + (gi - lane[k].im).powi(2)).sqrt();
-            let scale = (lane[k].re * lane[k].re + lane[k].im * lane[k].im).sqrt().max(1.0);
+            let scale = (lane[k].re * lane[k].re + lane[k].im * lane[k].im)
+                .sqrt()
+                .max(1.0);
             worst = worst.max(err / scale);
         }
     }
     let ok = worst <= 1e-4;
-    println!("warp_fft32 vs CPU model: max_rel_err = {worst:.2e} -> {}", if ok { "PASS" } else { "FAIL" });
+    println!(
+        "warp_fft32 vs CPU model: max_rel_err = {worst:.2e} -> {}",
+        if ok { "PASS" } else { "FAIL" }
+    );
     if !ok {
         return Err(anyhow!("correctness FAIL"));
     }

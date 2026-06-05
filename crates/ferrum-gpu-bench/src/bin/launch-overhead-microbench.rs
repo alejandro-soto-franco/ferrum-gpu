@@ -26,11 +26,19 @@ fn bench_core() -> Result<f64> {
     let ctx = CoreCtx::new(0)?;
     let module = core_kern::load(&ctx)?;
     let stream = ctx.default_stream();
-    let cfg = LaunchConfig { grid_dim: (1, 1, 1), block_dim: (1, 1, 1), shared_mem_bytes: 0 };
-    for _ in 0..WARMUP { module.noop(stream.as_ref(), cfg)?; }
+    let cfg = LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (1, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    for _ in 0..WARMUP {
+        module.noop(stream.as_ref(), cfg)?;
+    }
     stream.synchronize()?;
     let t0 = Instant::now();
-    for _ in 0..TRIALS { module.noop(stream.as_ref(), cfg)?; }
+    for _ in 0..TRIALS {
+        module.noop(stream.as_ref(), cfg)?;
+    }
     stream.synchronize()?;
     Ok(t0.elapsed().as_secs_f64() / TRIALS as f64)
 }
@@ -44,11 +52,18 @@ fn bench_cudarc() -> Result<f64> {
 .visible .entry noop() { ret; }
 "#;
     let ctx = CudarcCtx::new(0).map_err(|e| anyhow!("cudarc ctx: {e}"))?;
-    let module = ctx.load_module(cudarc::nvrtc::Ptx::from_src(ptx_src))
+    let module = ctx
+        .load_module(cudarc::nvrtc::Ptx::from_src(ptx_src))
         .map_err(|e| anyhow!("load_module: {e}"))?;
-    let func = module.load_function("noop").map_err(|e| anyhow!("load_function: {e}"))?;
+    let func = module
+        .load_function("noop")
+        .map_err(|e| anyhow!("load_function: {e}"))?;
     let stream = ctx.default_stream();
-    let cfg = CudarcCfg { grid_dim: (1, 1, 1), block_dim: (1, 1, 1), shared_mem_bytes: 0 };
+    let cfg = CudarcCfg {
+        grid_dim: (1, 1, 1),
+        block_dim: (1, 1, 1),
+        shared_mem_bytes: 0,
+    };
     for _ in 0..WARMUP {
         let mut builder = stream.launch_builder(&func);
         unsafe { builder.launch(cfg) }.map_err(|e| anyhow!("launch: {e}"))?;

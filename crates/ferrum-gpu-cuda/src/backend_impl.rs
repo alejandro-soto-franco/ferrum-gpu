@@ -6,16 +6,16 @@ use std::sync::Arc;
 
 use bytemuck::Pod;
 use cudarc::driver::{
-    sys, CudaContext, CudaFunction, CudaModule, CudaStream, LaunchConfig, PushKernelArg,
+    CudaContext, CudaFunction, CudaModule, CudaStream, LaunchConfig, PushKernelArg, sys,
 };
 use cudarc::nvrtc::Ptx;
 use ferrum_gpu_core::{
     AnyBufferHandle, Backend, BackendId, Dim3, KernelArtifact, LaunchArg, LaunchArgs,
 };
 
+use crate::Cuda;
 use crate::buffer::CudaBuffer;
 use crate::error::CudaBackendError;
-use crate::Cuda;
 
 impl Backend for Cuda {
     /// The device handle is the `Arc<CudaContext>` returned by `CudaContext::new`.
@@ -87,10 +87,7 @@ impl Backend for Cuda {
     }
 
     /// Look up a kernel function by name inside a loaded module.
-    fn get_kernel(
-        module: &Arc<CudaModule>,
-        name: &str,
-    ) -> Result<CudaFunction, CudaBackendError> {
+    fn get_kernel(module: &Arc<CudaModule>, name: &str) -> Result<CudaFunction, CudaBackendError> {
         module
             .load_function(name)
             .map_err(|_| CudaBackendError::KernelNotFound(name.into()))
@@ -118,7 +115,10 @@ impl Backend for Cuda {
 
         // Stable storage: one `CUdeviceptr` per buffer arg. Pre-sized so no
         // reallocation invalidates the references handed to the builder.
-        let buf_count = args.iter().filter(|a| matches!(a, LaunchArg::Buffer(_))).count();
+        let buf_count = args
+            .iter()
+            .filter(|a| matches!(a, LaunchArg::Buffer(_)))
+            .count();
         let mut buf_ptrs: Vec<sys::CUdeviceptr> = Vec::with_capacity(buf_count);
         for a in args.iter() {
             if let LaunchArg::Buffer(b) = a {

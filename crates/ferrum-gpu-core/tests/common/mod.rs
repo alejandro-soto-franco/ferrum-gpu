@@ -46,18 +46,47 @@ impl Backend for MockBackend {
     type KernelHandle = MockKernel;
     type Error = MockError;
 
-    fn id() -> BackendId { BackendId::Cuda }
+    fn id() -> BackendId {
+        BackendId::Cuda
+    }
     fn alloc_zeros<T: bytemuck::Pod>(_: &MockDevice, _: usize) -> Result<MockBuf<T>, MockError> {
         Ok(MockBuf(PhantomData))
     }
-    fn copy_h2d<T: bytemuck::Pod>(_: &MockDevice, _: &mut MockBuf<T>, _: &[T]) -> Result<(), MockError> { Ok(()) }
-    fn copy_d2h<T: bytemuck::Pod>(_: &MockDevice, _: &MockBuf<T>, _: &mut [T]) -> Result<(), MockError> { Ok(()) }
-    fn load_module(_: &MockDevice, _: &KernelArtifact) -> Result<MockModule, MockError> { Ok(MockModule) }
-    fn get_kernel(_: &MockModule, _: &str) -> Result<MockKernel, MockError> { Ok(MockKernel) }
+    fn copy_h2d<T: bytemuck::Pod>(
+        _: &MockDevice,
+        _: &mut MockBuf<T>,
+        _: &[T],
+    ) -> Result<(), MockError> {
+        Ok(())
+    }
+    fn copy_d2h<T: bytemuck::Pod>(
+        _: &MockDevice,
+        _: &MockBuf<T>,
+        _: &mut [T],
+    ) -> Result<(), MockError> {
+        Ok(())
+    }
+    fn load_module(_: &MockDevice, _: &KernelArtifact) -> Result<MockModule, MockError> {
+        Ok(MockModule)
+    }
+    fn get_kernel(_: &MockModule, _: &str) -> Result<MockKernel, MockError> {
+        Ok(MockKernel)
+    }
     fn launch(
-        _: &MockDevice, _: &MockStream, _: &MockKernel,
-        _: Dim3, _: Dim3, _: u32, _: LaunchArgs<'_, Self>,
-    ) -> Result<(), MockError> { Ok(()) }
-    fn default_stream(_: &MockDevice) -> MockStream { MockStream }
-    fn sync_stream(_: &MockDevice, _: &MockStream) -> Result<(), MockError> { Ok(()) }
+        _: &MockDevice,
+        _: &MockStream,
+        _: &MockKernel,
+        _: Dim3,
+        _: Dim3,
+        _: u32,
+        _: LaunchArgs<'_, Self>,
+    ) -> Result<(), MockError> {
+        Ok(())
+    }
+    fn default_stream(_: &MockDevice) -> MockStream {
+        MockStream
+    }
+    fn sync_stream(_: &MockDevice, _: &MockStream) -> Result<(), MockError> {
+        Ok(())
+    }
 }

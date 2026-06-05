@@ -19,9 +19,14 @@ fn main() -> Result<()> {
         let n = 1usize << log_n;
         let total = n * BATCH;
         let input: Vec<cufft_sys::float2> = (0..total)
-            .map(|i| cufft_sys::float2 { x: (i as f32 * 0.001).sin(), y: 0.0 })
+            .map(|i| cufft_sys::float2 {
+                x: (i as f32 * 0.001).sin(),
+                y: 0.0,
+            })
             .collect();
-        let mut d_in = stream.clone_htod(&input).map_err(|e| anyhow!("htod: {e}"))?;
+        let mut d_in = stream
+            .clone_htod(&input)
+            .map_err(|e| anyhow!("htod: {e}"))?;
         let mut d_out = stream
             .alloc_zeros::<cufft_sys::float2>(total)
             .map_err(|e| anyhow!("alloc: {e}"))?;

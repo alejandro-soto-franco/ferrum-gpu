@@ -53,8 +53,12 @@ impl<B: Backend> Device<B> {
     }
 
     /// Borrow the underlying backend handle (for backend-specific helpers).
-    pub fn handle(&self) -> &B::DeviceHandle { &self.inner }
+    pub fn handle(&self) -> &B::DeviceHandle {
+        &self.inner
+    }
 
     /// Borrow the default stream.
-    pub fn default_stream(&self) -> &B::Stream { &self.default_stream }
+    pub fn default_stream(&self) -> &B::Stream {
+        &self.default_stream
+    }
 }

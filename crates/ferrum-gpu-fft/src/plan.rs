@@ -58,7 +58,13 @@ impl Plan {
         assert!((2..=12).contains(&log_n), "log_n must be in [2, 12]");
         let twiddles_host = twiddles::twiddles(log_n);
         let kernel_kind = KernelKind::for_forward_pow2(log_n);
-        Self { log_n, batch, normalize, twiddles_host, kernel_kind }
+        Self {
+            log_n,
+            batch,
+            normalize,
+            twiddles_host,
+            kernel_kind,
+        }
     }
 
     /// Transform length: `1 << log_n`.
@@ -104,7 +110,11 @@ impl Plan2D {
     pub fn new(log_n_per_side: u32, normalize: bool) -> Self {
         assert!((2..=12).contains(&log_n_per_side));
         let twiddles_host = crate::twiddles::twiddles(log_n_per_side);
-        Self { log_n_per_side, normalize, twiddles_host }
+        Self {
+            log_n_per_side,
+            normalize,
+            twiddles_host,
+        }
     }
 
     /// Side length: `1 << log_n_per_side`.

@@ -1,6 +1,6 @@
 //! Integration test crate.
 
-use ferrum_gpu_fft::{twiddles, Complex32};
+use ferrum_gpu_fft::twiddles;
 
 #[test]
 fn twiddles_n4_outermost_value() {
@@ -27,9 +27,11 @@ fn twiddles_total_count_is_n_minus_one() {
         let n = 1usize << log_n;
         let tw = twiddles(log_n);
         assert_eq!(
-            tw.len(), n - 1,
+            tw.len(),
+            n - 1,
             "log_n={log_n}: expected {} twiddles, got {}",
-            n - 1, tw.len()
+            n - 1,
+            tw.len()
         );
     }
 }

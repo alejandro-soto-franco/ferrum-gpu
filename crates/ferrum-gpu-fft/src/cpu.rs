@@ -27,13 +27,7 @@ fn stage_offsets(log_n: u32) -> Vec<usize> {
 /// Reads from `src` and writes to `dst`. `n` is the transform length.
 /// `s` is the 1-based stage index. `tw` is the contiguous twiddle slice for
 /// this stage (length `2^(s-1)`).
-fn stockham_stage(
-    src: &[Complex32],
-    dst: &mut [Complex32],
-    n: usize,
-    s: u32,
-    tw: &[Complex32],
-) {
+fn stockham_stage(src: &[Complex32], dst: &mut [Complex32], n: usize, s: u32, tw: &[Complex32]) {
     let m = 1usize << s;
     let m_half = 1usize << (s - 1);
     let l = n / m;
@@ -168,7 +162,9 @@ mod tests {
         for (i, (a, b)) in buf.iter().zip(expected.iter()).enumerate() {
             assert!(
                 (a.re - b.re).abs() < 1e-5 && (a.im - b.im).abs() < 1e-5,
-                "bin {i}: got {:?}, expected {:?}", a, b
+                "bin {i}: got {:?}, expected {:?}",
+                a,
+                b
             );
         }
     }

@@ -1,0 +1,56 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  check:
+    name: fmt + check + clippy (host crates)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      # rust-toolchain.toml is picked up automatically by rustup on the runner.
+      - name: fmt check
+        run: cargo fmt --all -- --check
+
+      - name: check ferrum-gpu-core
+        run: cargo check -p ferrum-gpu-core
+
+      - name: check ferrum-gpu-fft
+        run: cargo check -p ferrum-gpu-fft
+
+      - name: clippy ferrum-gpu-core
+        run: cargo clippy -p ferrum-gpu-core --all-targets -- -D warnings
+
+      - name: clippy ferrum-gpu-fft
+        run: cargo clippy -p ferrum-gpu-fft --all-targets -- -D warnings

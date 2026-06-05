@@ -52,8 +52,12 @@ fn our_cdylib_path() -> Result<PathBuf> {
 /// the macro-generated `LoadedModule`.
 fn load_kernels(ctx: &Arc<CudaContext>) -> Result<kernels::LoadedModule> {
     let so_path = our_cdylib_path()?;
-    let bundles = artifact_bundles_from_binary_path(&so_path)
-        .map_err(|e| anyhow!("artifact bundles read failed for {}: {e}", so_path.display()))?;
+    let bundles = artifact_bundles_from_binary_path(&so_path).map_err(|e| {
+        anyhow!(
+            "artifact bundles read failed for {}: {e}",
+            so_path.display()
+        )
+    })?;
     let bundle = bundles
         .into_iter()
         .find(|b| b.name == env!("CARGO_PKG_NAME"))
@@ -70,8 +74,7 @@ fn load_kernels(ctx: &Arc<CudaContext>) -> Result<kernels::LoadedModule> {
     let cuda_module = ctx
         .load_module_from_image(ptx)
         .map_err(|e| anyhow!("load_module_from_image: {e}"))?;
-    kernels::from_module(cuda_module)
-        .map_err(|e| anyhow!("kernels::from_module: {e}"))
+    kernels::from_module(cuda_module).map_err(|e| anyhow!("kernels::from_module: {e}"))
 }
 
 /// Host-side runner. Input/output are flat f32 slices interleaved (re, im).
@@ -156,7 +159,13 @@ fn run_fft_flat_with_device(
                 // table as fft_c2c_4096_r16s but half the shared traffic, which
                 // takes N=4096 from ~1.4x cuFFT to near-parity (1.07-1.25x,
                 // occasionally winning) on sm_120. See tools/ncu/.
-                module.fft_c2c_4096_4step_reg(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+                module.fft_c2c_4096_4step_reg(
+                    stream.as_ref(),
+                    cfg,
+                    &dbuf_in,
+                    &dbuf_tw,
+                    &mut dbuf_out,
+                )?;
             }
         }
     } else {
@@ -360,9 +369,8 @@ impl Device {
     #[new]
     #[pyo3(signature = (ordinal = 0))]
     fn new(ordinal: usize) -> PyResult<Self> {
-        let inner = CudaContext::new(ordinal).map_err(|e| {
-            PyValueError::new_err(format!("CudaContext::new({ordinal}): {e}"))
-        })?;
+        let inner = CudaContext::new(ordinal)
+            .map_err(|e| PyValueError::new_err(format!("CudaContext::new({ordinal}): {e}")))?;
         let module = load_kernels(&inner)
             .map_err(|e| PyValueError::new_err(format!("load_kernels: {e}")))?;
         Ok(Self { inner, module })
@@ -445,15 +453,14 @@ fn fft_1d_c2c_pow2<'py>(
 
     // Pull Send-able handles out of the (potentially borrowed) Device BEFORE
     // entering allow_threads (PyRef<'_, Device> is !Send).
-    let device_handles: Option<(Arc<CudaContext>, kernels::LoadedModule)> = device
-        .as_ref()
-        .map(|d| (d.inner.clone(), d.module.clone()));
+    let device_handles: Option<(Arc<CudaContext>, kernels::LoadedModule)> =
+        device.as_ref().map(|d| (d.inner.clone(), d.module.clone()));
 
     let output_flat = py
         .allow_threads(|| match device_handles {
-            Some((ctx, module)) => run_fft_flat_with_device(
-                &ctx, &module, &input_flat, log_n, batch, dir_i, normalize,
-            ),
+            Some((ctx, module)) => {
+                run_fft_flat_with_device(&ctx, &module, &input_flat, log_n, batch, dir_i, normalize)
+            }
             None => run_fft_flat_oneshot(&input_flat, log_n, batch, dir_i, normalize),
         })
         .map_err(|e| PyValueError::new_err(format!("ferrum-gpu fft error: {e}")))?;
@@ -526,9 +533,8 @@ fn fft_2d_c2c_pow2<'py>(
         input_flat.push(c.im);
     }
 
-    let device_handles: Option<(Arc<CudaContext>, kernels::LoadedModule)> = device
-        .as_ref()
-        .map(|d| (d.inner.clone(), d.module.clone()));
+    let device_handles: Option<(Arc<CudaContext>, kernels::LoadedModule)> =
+        device.as_ref().map(|d| (d.inner.clone(), d.module.clone()));
 
     let output_flat = py
         .allow_threads(|| match device_handles {

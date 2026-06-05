@@ -76,7 +76,10 @@ fn main() -> anyhow::Result<()> {
     println!("loading hand-written PTX (target=sm_70)");
     let artifact = KernelArtifact {
         backend: BackendId::Cuda,
-        target: TargetInfo::Cuda { sm_major: 7, sm_minor: 0 },
+        target: TargetInfo::Cuda {
+            sm_major: 7,
+            sm_minor: 0,
+        },
         blob: Cow::Borrowed(VECTOR_ADD_PTX.as_bytes()),
         manifest: vec![KernelMeta {
             mangled_name: "vector_add".into(),
@@ -88,7 +91,10 @@ fn main() -> anyhow::Result<()> {
             ],
             shared_memory_bytes: 0,
             recommended_block: Some(Dim3::new(256, 1, 1)),
-            required_caps: BackendCaps::Cuda { min_sm_major: 5, min_sm_minor: 0 },
+            required_caps: BackendCaps::Cuda {
+                min_sm_major: 5,
+                min_sm_minor: 0,
+            },
         }],
     };
     let module = dev.load_or_cache("vector-add", &artifact)?;
@@ -105,7 +111,15 @@ fn main() -> anyhow::Result<()> {
     let pack = LaunchArgs::new(&args);
     let grid = Dim3::new((n as u32).div_ceil(256), 1, 1);
     let block = Dim3::new(256, 1, 1);
-    Cuda::launch(dev.handle(), dev.default_stream(), &kernel, grid, block, 0, pack)?;
+    Cuda::launch(
+        dev.handle(),
+        dev.default_stream(),
+        &kernel,
+        grid,
+        block,
+        0,
+        pack,
+    )?;
     dev.sync()?;
 
     let mut c = vec![0.0_f32; n as usize];

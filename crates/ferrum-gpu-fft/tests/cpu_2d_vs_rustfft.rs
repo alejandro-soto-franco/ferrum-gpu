@@ -33,7 +33,9 @@ fn rustfft_2d_forward(input: &[Complex32], n: usize) -> Vec<Complex32> {
             out[j * n + i] = col_major[i * n + j];
         }
     }
-    out.into_iter().map(|c| Complex32::new(c.re, c.im)).collect()
+    out.into_iter()
+        .map(|c| Complex32::new(c.re, c.im))
+        .collect()
 }
 
 #[test]
@@ -55,7 +57,10 @@ fn cross_check_n8_n64() {
             assert!(
                 rel < 1e-4,
                 "log_n={log_n} 2D mismatch at {i}: got ({}, {}), expected ({}, {}), rel={rel}",
-                buf[i].re, buf[i].im, expected[i].re, expected[i].im
+                buf[i].re,
+                buf[i].im,
+                expected[i].re,
+                expected[i].im
             );
         }
     }

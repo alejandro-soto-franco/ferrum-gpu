@@ -24,7 +24,11 @@ mod kernels {
                     (1.0, 0.0)
                 } else {
                     let idx = ((k * n) % 8) - 1;
-                    if idx == 0 { (1.0, 0.0) } else { (tw[2 * (idx % 7)], tw[2 * (idx % 7) + 1]) }
+                    if idx == 0 {
+                        (1.0, 0.0)
+                    } else {
+                        (tw[2 * (idx % 7)], tw[2 * (idx % 7) + 1])
+                    }
                 };
                 let xr = x[2 * n];
                 let xi = x[2 * n + 1];
@@ -38,10 +42,7 @@ mod kernels {
     }
 
     #[kernel]
-    pub(crate) fn radix8_pressure(
-        in_data: &[f32],
-        mut out_data: DisjointSlice<f32>,
-    ) {
+    pub(crate) fn radix8_pressure(in_data: &[f32], mut out_data: DisjointSlice<f32>) {
         let tid = thread::threadIdx_x() as usize;
         let base = tid * 16;
         let mut x = [0.0f32; 16];
@@ -50,19 +51,16 @@ mod kernels {
         }
         // Static twiddle constants approximating the radix-8 inner table.
         let tw: [f32; 14] = [
-            0.7071068,  -0.7071068,
-            0.0,        -1.0,
-           -0.7071068,  -0.7071068,
-           -1.0,         0.0,
-           -0.7071068,   0.7071068,
-            0.0,         1.0,
-            0.7071068,   0.7071068,
+            0.7071068, -0.7071068, 0.0, -1.0, -0.7071068, -0.7071068, -1.0, 0.0, -0.7071068,
+            0.7071068, 0.0, 1.0, 0.7071068, 0.7071068,
         ];
         for _ in 0..4 {
             radix8_butterfly_inplace(&mut x, &tw);
         }
         for i in 0..16 {
-            unsafe { *out_data.get_unchecked_mut(base + i) = x[i]; }
+            unsafe {
+                *out_data.get_unchecked_mut(base + i) = x[i];
+            }
         }
     }
 }
@@ -74,7 +72,11 @@ fn main() -> Result<()> {
     let input: Vec<f32> = (0..512 * 16).map(|i| (i as f32 * 0.001).sin()).collect();
     let dbuf_in = DeviceBuffer::from_host(&stream, &input)?;
     let mut dbuf_out = DeviceBuffer::<f32>::zeroed(&stream, input.len())?;
-    let cfg = LaunchConfig { grid_dim: (1, 1, 1), block_dim: (512, 1, 1), shared_mem_bytes: 0 };
+    let cfg = LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (512, 1, 1),
+        shared_mem_bytes: 0,
+    };
     module.radix8_pressure(stream.as_ref(), cfg, &dbuf_in, &mut dbuf_out)?;
     let _ = dbuf_out.to_host_vec(&stream)?;
     println!("radix8_pressure: ok");

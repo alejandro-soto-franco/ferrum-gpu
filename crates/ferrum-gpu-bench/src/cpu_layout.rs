@@ -137,6 +137,111 @@ pub fn split_radix_soa(re: &[f32], im: &[f32], ore: &mut [f32], oim: &mut [f32])
     }
 }
 
+// ---------------------------------------------------------------------------
+// Allocation-free iterative radix-2 FFT, both layouts.
+//
+// The recursive `split_radix_*` pair above allocates scratch vectors at every
+// recursion level, and the SoA arm allocates twice as many (re and im split),
+// so a slice of its measured interleaved-vs-SoA gap is malloc traffic, not
+// layout. The pair below removes allocation entirely: the bit-reversal table
+// and twiddle table are precomputed once (outside any timed region) and the
+// transform runs in a caller-owned, preallocated buffer. Identical arithmetic
+// in both layouts; only the data indexing differs (one (re,im) pair per index
+// vs two parallel arrays). This isolates layout = cache-adjacency, nothing else.
+
+/// Bit-reversal permutation table for an N-point transform (N a power of two).
+/// Precompute once, reuse across calls and batches.
+pub fn bit_reverse_table(n: usize) -> Vec<usize> {
+    let bits = n.trailing_zeros();
+    (0..n)
+        .map(|i| (i as u32).reverse_bits() >> (32 - bits))
+        .map(|r| r as usize)
+        .collect()
+}
+
+/// Twiddle table `[cos, sin, ...]` of `exp(-2*pi*i*j/N)` for j in 0..N/2.
+/// Precompute once, reuse across calls and batches.
+pub fn twiddle_table(n: usize) -> Vec<f32> {
+    (0..n / 2)
+        .flat_map(|j| {
+            let th = -2.0 * core::f64::consts::PI * (j as f64) / (n as f64);
+            [th.cos() as f32, th.sin() as f32]
+        })
+        .collect()
+}
+
+/// Allocation-free iterative radix-2 DIT FFT, interleaved `[re, im, ...]`.
+/// Gathers `src` into `dst` by bit-reversal, then runs in place in `dst`.
+/// `brev` and `tw` come from `bit_reverse_table` / `twiddle_table`.
+pub fn fft_iter_interleaved(src: &[f32], dst: &mut [f32], brev: &[usize], tw: &[f32]) {
+    let n = src.len() / 2;
+    for i in 0..n {
+        let j = brev[i];
+        dst[2 * i] = src[2 * j];
+        dst[2 * i + 1] = src[2 * j + 1];
+    }
+    let mut len = 2;
+    while len <= n {
+        let half = len / 2;
+        let step = n / len;
+        let mut base = 0;
+        while base < n {
+            for k in 0..half {
+                let (wr, wi) = (tw[2 * k * step], tw[2 * k * step + 1]);
+                let (ar, ai) = (dst[2 * (base + k + half)], dst[2 * (base + k + half) + 1]);
+                let vr = wr * ar - wi * ai;
+                let vi = wr * ai + wi * ar;
+                let (ur, ui) = (dst[2 * (base + k)], dst[2 * (base + k) + 1]);
+                dst[2 * (base + k)] = ur + vr;
+                dst[2 * (base + k) + 1] = ui + vi;
+                dst[2 * (base + k + half)] = ur - vr;
+                dst[2 * (base + k + half) + 1] = ui - vi;
+            }
+            base += len;
+        }
+        len <<= 1;
+    }
+}
+
+/// Allocation-free iterative radix-2 DIT FFT, split / SoA (`re`, `im` arrays).
+/// Identical arithmetic to `fft_iter_interleaved`; only indexing differs.
+pub fn fft_iter_soa(
+    sre: &[f32],
+    sim: &[f32],
+    dre: &mut [f32],
+    dim: &mut [f32],
+    brev: &[usize],
+    tw: &[f32],
+) {
+    let n = sre.len();
+    for i in 0..n {
+        let j = brev[i];
+        dre[i] = sre[j];
+        dim[i] = sim[j];
+    }
+    let mut len = 2;
+    while len <= n {
+        let half = len / 2;
+        let step = n / len;
+        let mut base = 0;
+        while base < n {
+            for k in 0..half {
+                let (wr, wi) = (tw[2 * k * step], tw[2 * k * step + 1]);
+                let (ar, ai) = (dre[base + k + half], dim[base + k + half]);
+                let vr = wr * ar - wi * ai;
+                let vi = wr * ai + wi * ar;
+                let (ur, ui) = (dre[base + k], dim[base + k]);
+                dre[base + k] = ur + vr;
+                dim[base + k] = ui + vi;
+                dre[base + k + half] = ur - vr;
+                dim[base + k + half] = ui - vi;
+            }
+            base += len;
+        }
+        len <<= 1;
+    }
+}
+
 /// Split / SoA complex multiply: clean vertical SIMD, no deinterleave.
 pub fn cmul_soa(ar: &[f32], ai: &[f32], br: &[f32], bi: &[f32], or: &mut [f32], oi: &mut [f32]) {
     let n = ar.len();
@@ -171,14 +276,15 @@ pub fn cmul_interleaved(a: &[f32], b: &[f32], out: &mut [f32]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rustfft::{num_complex::Complex, FftPlanner};
+    use rustfft::{FftPlanner, num_complex::Complex};
 
     fn rustfft_ref(x: &[f32]) -> Vec<f32> {
         let n = x.len() / 2;
         let mut planner = FftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(n);
-        let mut buf: Vec<Complex<f32>> =
-            (0..n).map(|i| Complex::new(x[2 * i], x[2 * i + 1])).collect();
+        let mut buf: Vec<Complex<f32>> = (0..n)
+            .map(|i| Complex::new(x[2 * i], x[2 * i + 1]))
+            .collect();
         fft.process(&mut buf);
         buf.iter().flat_map(|c| [c.re, c.im]).collect()
     }
@@ -186,11 +292,17 @@ mod tests {
     #[test]
     fn split_radix_interleaved_matches_rustfft() {
         for &n in &[256usize, 1024, 4096] {
-            let x: Vec<f32> = (0..2 * n).map(|i| ((i * 7 + 3) % 17) as f32 - 8.0).collect();
+            let x: Vec<f32> = (0..2 * n)
+                .map(|i| ((i * 7 + 3) % 17) as f32 - 8.0)
+                .collect();
             let mut out = vec![0.0f32; 2 * n];
             split_radix_interleaved(&x, &mut out);
             let r = rustfft_ref(&x);
-            let err = out.iter().zip(r.iter()).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+            let err = out
+                .iter()
+                .zip(r.iter())
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0, f32::max);
             assert!(err < 1.0, "N={n} max abs err {err}");
         }
     }
@@ -198,16 +310,57 @@ mod tests {
     #[test]
     fn split_radix_soa_matches_interleaved() {
         for &n in &[256usize, 1024, 4096] {
-            let x: Vec<f32> = (0..2 * n).map(|i| ((i * 11 + 1) % 13) as f32 - 6.0).collect();
+            let x: Vec<f32> = (0..2 * n)
+                .map(|i| ((i * 11 + 1) % 13) as f32 - 6.0)
+                .collect();
             let mut oi = vec![0.0f32; 2 * n];
             split_radix_interleaved(&x, &mut oi);
-            let (re, im): (Vec<f32>, Vec<f32>) =
-                (0..n).map(|i| (x[2 * i], x[2 * i + 1])).unzip();
+            let (re, im): (Vec<f32>, Vec<f32>) = (0..n).map(|i| (x[2 * i], x[2 * i + 1])).unzip();
             let (mut orr, mut oii) = (vec![0.0f32; n], vec![0.0f32; n]);
             split_radix_soa(&re, &im, &mut orr, &mut oii);
             for k in 0..n {
                 assert!((orr[k] - oi[2 * k]).abs() < 1e-2, "N={n} re k={k}");
                 assert!((oii[k] - oi[2 * k + 1]).abs() < 1e-2, "N={n} im k={k}");
+            }
+        }
+    }
+
+    #[test]
+    fn fft_iter_interleaved_matches_rustfft() {
+        for &n in &[256usize, 1024, 4096] {
+            let x: Vec<f32> = (0..2 * n)
+                .map(|i| ((i * 7 + 3) % 17) as f32 - 8.0)
+                .collect();
+            let brev = bit_reverse_table(n);
+            let tw = twiddle_table(n);
+            let mut out = vec![0.0f32; 2 * n];
+            fft_iter_interleaved(&x, &mut out, &brev, &tw);
+            let r = rustfft_ref(&x);
+            let err = out
+                .iter()
+                .zip(r.iter())
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0, f32::max);
+            assert!(err < 1.0, "N={n} max abs err {err}");
+        }
+    }
+
+    #[test]
+    fn fft_iter_soa_matches_interleaved() {
+        for &n in &[256usize, 1024, 4096] {
+            let x: Vec<f32> = (0..2 * n)
+                .map(|i| ((i * 11 + 1) % 13) as f32 - 6.0)
+                .collect();
+            let brev = bit_reverse_table(n);
+            let tw = twiddle_table(n);
+            let mut oi = vec![0.0f32; 2 * n];
+            fft_iter_interleaved(&x, &mut oi, &brev, &tw);
+            let (re, im): (Vec<f32>, Vec<f32>) = (0..n).map(|i| (x[2 * i], x[2 * i + 1])).unzip();
+            let (mut orr, mut oii) = (vec![0.0f32; n], vec![0.0f32; n]);
+            fft_iter_soa(&re, &im, &mut orr, &mut oii, &brev, &tw);
+            for k in 0..n {
+                assert!((orr[k] - oi[2 * k]).abs() < 1e-3, "N={n} re k={k}");
+                assert!((oii[k] - oi[2 * k + 1]).abs() < 1e-3, "N={n} im k={k}");
             }
         }
     }

@@ -158,11 +158,13 @@ pub fn four_step_model(input: &[Complex32], log_n1: u32, log_n2: u32) -> Vec<Com
 /// four-step decomposition `256 = 32 x 8` (N1=32 the warp/lane dimension,
 /// N2=8 the in-register dimension). Executable spec for the GPU kernel's lane
 /// layout and output ordering:
-///   * lane L holds 8 inputs `x[L + 32*n2]`, `n2 in 0..8`;
-///   * step 1: in-register 8-pt DFT over n2 -> `B[L][k2]`;
-///   * step 2: twiddle `B[L][k2] *= W_256^(L*k2)`;
-///   * step 3: 32-pt warp DFT over the lane dimension for each k2 -> X;
-///   * output `X[8*k1 + k2]` (k1 = lane after the warp transform).
+///
+/// * lane L holds 8 inputs `x[L + 32*n2]`, `n2 in 0..8`;
+/// * step 1: in-register 8-pt DFT over n2 -> `B[L][k2]`;
+/// * step 2: twiddle `B[L][k2] *= W_256^(L*k2)`;
+/// * step 3: 32-pt warp DFT over the lane dimension for each k2 -> X;
+/// * output `X[8*k1 + k2]` (k1 = lane after the warp transform).
+///
 /// Verified against the radix-2 reference in tests.
 pub fn warp256_model(input: &[Complex32]) -> Vec<Complex32> {
     four_step_model(input, 5, 3)
@@ -173,6 +175,7 @@ mod tests {
     use super::*;
     use crate::plan::{Direction, Plan};
 
+    #[allow(clippy::needless_range_loop)]
     fn direct_dft32(x: &[Complex32; 32]) -> [Complex32; 32] {
         let mut out = [Complex32::zero(); 32];
         for k in 0..32usize {
@@ -216,8 +219,15 @@ mod tests {
             warp_dif_model(&mut x, log_n);
             for k in 0..n {
                 let err = ((x[k].re - want[k].re).powi(2) + (x[k].im - want[k].im).powi(2)).sqrt();
-                let scale = (want[k].re * want[k].re + want[k].im * want[k].im).sqrt().max(1.0);
-                assert!(err / scale < 1e-4, "n={n} bin {k}: got {:?} want {:?}", x[k], want[k]);
+                let scale = (want[k].re * want[k].re + want[k].im * want[k].im)
+                    .sqrt()
+                    .max(1.0);
+                assert!(
+                    err / scale < 1e-4,
+                    "n={n} bin {k}: got {:?} want {:?}",
+                    x[k],
+                    want[k]
+                );
             }
         }
     }
@@ -236,8 +246,9 @@ mod tests {
             let err = ((got[k].re - reference[k].re).powi(2)
                 + (got[k].im - reference[k].im).powi(2))
             .sqrt();
-            let scale =
-                (reference[k].re * reference[k].re + reference[k].im * reference[k].im).sqrt().max(1.0);
+            let scale = (reference[k].re * reference[k].re + reference[k].im * reference[k].im)
+                .sqrt()
+                .max(1.0);
             assert!(
                 err / scale < 1e-3,
                 "bin {k}: four-step {:?} vs radix-2 {:?}",
@@ -263,8 +274,9 @@ mod tests {
             let err = ((got[k].re - reference[k].re).powi(2)
                 + (got[k].im - reference[k].im).powi(2))
             .sqrt();
-            let scale =
-                (reference[k].re * reference[k].re + reference[k].im * reference[k].im).sqrt().max(1.0);
+            let scale = (reference[k].re * reference[k].re + reference[k].im * reference[k].im)
+                .sqrt()
+                .max(1.0);
             assert!(
                 err / scale < 1e-3,
                 "bin {k}: warp256 {:?} vs radix-2 {:?}",
@@ -275,6 +287,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_range_loop)]
     fn warp_fft32_matches_direct() {
         let mut x = [Complex32::zero(); 32];
         for n in 0..32usize {
@@ -284,7 +297,9 @@ mod tests {
         warp_fft32_model(&mut x);
         for k in 0..32usize {
             let err = ((x[k].re - want[k].re).powi(2) + (x[k].im - want[k].im).powi(2)).sqrt();
-            let scale = (want[k].re * want[k].re + want[k].im * want[k].im).sqrt().max(1.0);
+            let scale = (want[k].re * want[k].re + want[k].im * want[k].im)
+                .sqrt()
+                .max(1.0);
             assert!(
                 err / scale < 1e-4,
                 "bin {k}: got {:?}, want {:?}, relerr {}",

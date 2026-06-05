@@ -52,14 +52,70 @@ struct Case {
 }
 
 const CASES: &[Case] = &[
-    Case { log_n: 2,  batch: 1, dir: Direction::Forward, normalize: false, rel_tol: 1e-4, label: "N=4 fwd" },
-    Case { log_n: 3,  batch: 1, dir: Direction::Forward, normalize: false, rel_tol: 1e-4, label: "N=8 fwd" },
-    Case { log_n: 6,  batch: 1, dir: Direction::Forward, normalize: false, rel_tol: 1e-4, label: "N=64 fwd" },
-    Case { log_n: 8,  batch: 1, dir: Direction::Forward, normalize: false, rel_tol: 1e-4, label: "N=256 fwd" },
-    Case { log_n: 10, batch: 1, dir: Direction::Forward, normalize: false, rel_tol: 1e-4, label: "N=1024 fwd" },
-    Case { log_n: 12, batch: 1, dir: Direction::Forward, normalize: false, rel_tol: 5e-4, label: "N=4096 fwd" },
-    Case { log_n: 8,  batch: 8, dir: Direction::Forward, normalize: false, rel_tol: 1e-4, label: "N=256 fwd batch=8" },
-    Case { log_n: 8,  batch: 1, dir: Direction::Inverse, normalize: true,  rel_tol: 1e-4, label: "N=256 inv normalize" },
+    Case {
+        log_n: 2,
+        batch: 1,
+        dir: Direction::Forward,
+        normalize: false,
+        rel_tol: 1e-4,
+        label: "N=4 fwd",
+    },
+    Case {
+        log_n: 3,
+        batch: 1,
+        dir: Direction::Forward,
+        normalize: false,
+        rel_tol: 1e-4,
+        label: "N=8 fwd",
+    },
+    Case {
+        log_n: 6,
+        batch: 1,
+        dir: Direction::Forward,
+        normalize: false,
+        rel_tol: 1e-4,
+        label: "N=64 fwd",
+    },
+    Case {
+        log_n: 8,
+        batch: 1,
+        dir: Direction::Forward,
+        normalize: false,
+        rel_tol: 1e-4,
+        label: "N=256 fwd",
+    },
+    Case {
+        log_n: 10,
+        batch: 1,
+        dir: Direction::Forward,
+        normalize: false,
+        rel_tol: 1e-4,
+        label: "N=1024 fwd",
+    },
+    Case {
+        log_n: 12,
+        batch: 1,
+        dir: Direction::Forward,
+        normalize: false,
+        rel_tol: 5e-4,
+        label: "N=4096 fwd",
+    },
+    Case {
+        log_n: 8,
+        batch: 8,
+        dir: Direction::Forward,
+        normalize: false,
+        rel_tol: 1e-4,
+        label: "N=256 fwd batch=8",
+    },
+    Case {
+        log_n: 8,
+        batch: 1,
+        dir: Direction::Inverse,
+        normalize: true,
+        rel_tol: 1e-4,
+        label: "N=256 inv normalize",
+    },
 ];
 
 fn run_case(
@@ -198,6 +254,10 @@ fn main() -> Result<()> {
     if fails > 0 {
         anyhow::bail!("{} of {} cases failed", fails, CASES.len());
     }
-    println!("\nfft-1d-c2c: {}/{} cases verified", CASES.len(), CASES.len());
+    println!(
+        "\nfft-1d-c2c: {}/{} cases verified",
+        CASES.len(),
+        CASES.len()
+    );
     Ok(())
 }

@@ -66,7 +66,13 @@ fn main() -> Result<()> {
     let ratio = fe / cu_us;
     println!(
         "N=256 warp (K={k} warps/block): ferrum {fe:.4} us  cufft {cu_us:.4} us  ratio {ratio:.3}  {}",
-        if ratio < 1.0 { "BEATS cuFFT" } else if ratio <= 0.9 { "PASS gate" } else { "" }
+        if ratio < 1.0 {
+            "BEATS cuFFT"
+        } else if ratio <= 0.9 {
+            "PASS gate"
+        } else {
+            ""
+        }
     );
     Ok(())
 }

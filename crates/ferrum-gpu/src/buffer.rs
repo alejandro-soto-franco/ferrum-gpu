@@ -12,15 +12,23 @@ pub struct Buffer<T: Pod, B: Backend> {
 }
 
 impl<T: Pod, B: Backend> Buffer<T, B> {
-    pub(crate) fn from_handle(handle: B::BufferHandle<T>, dev: B::DeviceHandle, len: usize) -> Self {
+    pub(crate) fn from_handle(
+        handle: B::BufferHandle<T>,
+        dev: B::DeviceHandle,
+        len: usize,
+    ) -> Self {
         Self { handle, dev, len }
     }
 
     /// Number of elements.
-    pub fn len(&self) -> usize { self.len }
+    pub fn len(&self) -> usize {
+        self.len
+    }
 
     /// `true` if zero-length.
-    pub fn is_empty(&self) -> bool { self.len == 0 }
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
 
     /// Copy host slice into device buffer (synchronous).
     pub fn copy_from_host(&mut self, src: &[T]) -> Result<(), B::Error> {
@@ -33,5 +41,7 @@ impl<T: Pod, B: Backend> Buffer<T, B> {
     }
 
     /// Borrow the underlying backend handle (for launch packing).
-    pub fn handle(&self) -> &B::BufferHandle<T> { &self.handle }
+    pub fn handle(&self) -> &B::BufferHandle<T> {
+        &self.handle
+    }
 }

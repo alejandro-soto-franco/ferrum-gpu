@@ -11,7 +11,7 @@ use anyhow::Result;
 
 use ferrum_gpu_bench::{
     BATCH, LOG_NS, TRIALS, WARMUP, alternating_bench, fallback_launch_cfg, init_cuda_contexts,
-    spec1024_launch_cfg, spec256_launch_cfg, spec4096_launch_cfg,
+    spec256_launch_cfg, spec1024_launch_cfg, spec4096_launch_cfg,
 };
 use ferrum_gpu_fft::KernelKind;
 
@@ -91,7 +91,11 @@ fn main() -> Result<()> {
         let cu_ev_us = cu.event_med_s * 1.0e6 / (BATCH as f64);
         let fe_wl_us = ferr.wall_mean_s * 1.0e6 / (BATCH as f64);
         let cu_wl_us = cu.wall_mean_s * 1.0e6 / (BATCH as f64);
-        let sp_event = if fe_ev_us > 0.0 { cu_ev_us / fe_ev_us } else { f64::NAN };
+        let sp_event = if fe_ev_us > 0.0 {
+            cu_ev_us / fe_ev_us
+        } else {
+            f64::NAN
+        };
         println!(
             "{:<8} {:<11.3} {:<11.3} {:<11.3} {:<11.3} {:<9.2}",
             n, fe_ev_us, cu_ev_us, fe_wl_us, cu_wl_us, sp_event

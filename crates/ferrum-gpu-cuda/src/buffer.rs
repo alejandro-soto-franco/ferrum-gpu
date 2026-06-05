@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use bytemuck::Pod;
-use cudarc::driver::{result, CudaContext, CudaStream};
+use cudarc::driver::{CudaContext, CudaStream, result};
 
 /// Owned device buffer of `n` elements of type `T`.
 ///

@@ -88,7 +88,9 @@ fn main() -> Result<()> {
             let gr = gpu[(f * N + k) * 2];
             let gi = gpu[(f * N + k) * 2 + 1];
             let em = ((gr - model[k].re).powi(2) + (gi - model[k].im).powi(2)).sqrt();
-            let sm = (model[k].re * model[k].re + model[k].im * model[k].im).sqrt().max(1.0);
+            let sm = (model[k].re * model[k].re + model[k].im * model[k].im)
+                .sqrt()
+                .max(1.0);
             worst_model = worst_model.max(em / sm);
             let er = ((gr - reference[k].re).powi(2) + (gi - reference[k].im).powi(2)).sqrt();
             let sr = (reference[k].re * reference[k].re + reference[k].im * reference[k].im)

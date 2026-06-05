@@ -136,11 +136,20 @@ fn median(mut v: Vec<f64>) -> f64 {
 
 fn main() -> Result<()> {
     let (core_ctx, cudarc_ctx) = init_cuda_contexts()?;
-    let batch: usize = std::env::var("NVCC_BATCH").ok().and_then(|s| s.parse().ok()).unwrap_or(4096);
+    let batch: usize = std::env::var("NVCC_BATCH")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(4096);
     // WARMUP/TRIALS are env-overridable so a profiler run (ncu) can do just the
     // correctness gate plus a minimal tail instead of 50 + 400 timed launches.
-    let warmup: usize = std::env::var("WARMUP").ok().and_then(|s| s.parse().ok()).unwrap_or(WARMUP_DEFAULT);
-    let trials: usize = std::env::var("TRIALS").ok().and_then(|s| s.parse().ok()).unwrap_or(TRIALS_DEFAULT);
+    let warmup: usize = std::env::var("WARMUP")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(WARMUP_DEFAULT);
+    let trials: usize = std::env::var("TRIALS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(TRIALS_DEFAULT);
     let n = 256usize;
     let total = n * batch;
 
@@ -157,26 +166,51 @@ fn main() -> Result<()> {
     let o_in = DeviceBuffer::from_host(&core_stream, &input_flat)?;
     let o_w = DeviceBuffer::from_host(&core_stream, &w_flat)?;
     let mut o_out = DeviceBuffer::<f32>::zeroed(&core_stream, total * 2)?;
-    let o_cfg = LaunchConfig { grid_dim: (batch as u32, 1, 1), block_dim: (32, 1, 1), shared_mem_bytes: 0 };
-    let run_oxide = |din: &DeviceBuffer<f32>, dw: &DeviceBuffer<f32>, dout: &mut DeviceBuffer<f32>| -> Result<()> {
+    let o_cfg = LaunchConfig {
+        grid_dim: (batch as u32, 1, 1),
+        block_dim: (32, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    let run_oxide = |din: &DeviceBuffer<f32>,
+                     dw: &DeviceBuffer<f32>,
+                     dout: &mut DeviceBuffer<f32>|
+     -> Result<()> {
         mod_k.fft_c2c_256_r16s(core_stream.as_ref(), o_cfg, din, dw, dout)?;
         Ok(())
     };
 
     // ---- nvcc (cudarc + NVRTC) ----
-    let opts = cudarc::nvrtc::CompileOptions { arch: Some("compute_120"), ..Default::default() };
+    let opts = cudarc::nvrtc::CompileOptions {
+        arch: Some("compute_120"),
+        ..Default::default()
+    };
     let ptx = cudarc::nvrtc::compile_ptx_with_opts(CUDA_SRC, opts)
         .map_err(|e| anyhow!("nvrtc compile: {e}"))?;
     let cu_stream = cudarc_ctx.default_stream();
-    let nv_module = cudarc_ctx.load_module(ptx).map_err(|e| anyhow!("load_module: {e}"))?;
-    let nv_func = nv_module.load_function("fft256_r16s").map_err(|e| anyhow!("load_function: {e}"))?;
-    let n_in = cu_stream.clone_htod(&input_flat).map_err(|e| anyhow!("htod in: {e}"))?;
-    let n_w = cu_stream.clone_htod(&w_flat).map_err(|e| anyhow!("htod w: {e}"))?;
-    let mut n_out = cu_stream.alloc_zeros::<f32>(total * 2).map_err(|e| anyhow!("alloc out: {e}"))?;
-    let nv_cfg = CuLaunchConfig { grid_dim: (batch as u32, 1, 1), block_dim: (32, 1, 1), shared_mem_bytes: 0 };
+    let nv_module = cudarc_ctx
+        .load_module(ptx)
+        .map_err(|e| anyhow!("load_module: {e}"))?;
+    let nv_func = nv_module
+        .load_function("fft256_r16s")
+        .map_err(|e| anyhow!("load_function: {e}"))?;
+    let n_in = cu_stream
+        .clone_htod(&input_flat)
+        .map_err(|e| anyhow!("htod in: {e}"))?;
+    let n_w = cu_stream
+        .clone_htod(&w_flat)
+        .map_err(|e| anyhow!("htod w: {e}"))?;
+    let mut n_out = cu_stream
+        .alloc_zeros::<f32>(total * 2)
+        .map_err(|e| anyhow!("alloc out: {e}"))?;
+    let nv_cfg = CuLaunchConfig {
+        grid_dim: (batch as u32, 1, 1),
+        block_dim: (32, 1, 1),
+        shared_mem_bytes: 0,
+    };
     let run_nvcc = |din: &cudarc::driver::CudaSlice<f32>,
                     dw: &cudarc::driver::CudaSlice<f32>,
-                    dout: &mut cudarc::driver::CudaSlice<f32>| -> Result<()> {
+                    dout: &mut cudarc::driver::CudaSlice<f32>|
+     -> Result<()> {
         let mut lb = cu_stream.launch_builder(&nv_func);
         lb.arg(din).arg(dw).arg(dout);
         unsafe { lb.launch(nv_cfg) }.map_err(|e| anyhow!("nvcc launch: {e}"))?;
@@ -185,12 +219,24 @@ fn main() -> Result<()> {
 
     // ---- cuFFT reference ----
     let cu_in_data: Vec<cufft_sys::float2> = (0..total)
-        .map(|i| cufft_sys::float2 { x: ((2 * i) as f32 * 0.001).sin(), y: ((2 * i + 1) as f32 * 0.001).sin() })
+        .map(|i| cufft_sys::float2 {
+            x: ((2 * i) as f32 * 0.001).sin(),
+            y: ((2 * i + 1) as f32 * 0.001).sin(),
+        })
         .collect();
-    let mut c_in = cu_stream.clone_htod(&cu_in_data).map_err(|e| anyhow!("htod cufft: {e}"))?;
-    let mut c_out = cu_stream.alloc_zeros::<cufft_sys::float2>(total).map_err(|e| anyhow!("alloc cufft: {e}"))?;
-    let c_plan = CudaFft::plan_1d(n as i32, cufft_sys::cufftType::CUFFT_C2C, batch as i32, cu_stream.clone())
-        .map_err(|e| anyhow!("cufft plan: {e:?}"))?;
+    let mut c_in = cu_stream
+        .clone_htod(&cu_in_data)
+        .map_err(|e| anyhow!("htod cufft: {e}"))?;
+    let mut c_out = cu_stream
+        .alloc_zeros::<cufft_sys::float2>(total)
+        .map_err(|e| anyhow!("alloc cufft: {e}"))?;
+    let c_plan = CudaFft::plan_1d(
+        n as i32,
+        cufft_sys::cufftType::CUFFT_C2C,
+        batch as i32,
+        cu_stream.clone(),
+    )
+    .map_err(|e| anyhow!("cufft plan: {e:?}"))?;
 
     // ---- Correctness: oxide and nvcc vs the radix-2 CPU reference ----
     run_oxide(&o_in, &o_w, &mut o_out)?;
@@ -198,16 +244,24 @@ fn main() -> Result<()> {
     core_stream.synchronize()?;
     cu_stream.synchronize().map_err(|e| anyhow!("sync: {e}"))?;
     let o_host = o_out.to_host_vec(&core_stream)?;
-    let n_host = cu_stream.clone_dtoh(&n_out).map_err(|e| anyhow!("dtoh: {e}"))?;
+    let n_host = cu_stream
+        .clone_dtoh(&n_out)
+        .map_err(|e| anyhow!("dtoh: {e}"))?;
     let mut worst_o = 0.0f32;
     let mut worst_n = 0.0f32;
     for f in 0..batch.min(64) {
-        let mut r: Vec<Complex32> = (0..n).map(|t| Complex32::new(input_flat[(f * n + t) * 2], input_flat[(f * n + t) * 2 + 1])).collect();
+        let mut r: Vec<Complex32> = (0..n)
+            .map(|t| Complex32::new(input_flat[(f * n + t) * 2], input_flat[(f * n + t) * 2 + 1]))
+            .collect();
         Plan::new(8, 1, false).cpu_execute(&mut r, Direction::Forward);
         for t in 0..n {
             let mag = (r[t].re.powi(2) + r[t].im.powi(2)).sqrt().max(1.0);
-            let eo = ((o_host[(f * n + t) * 2] - r[t].re).powi(2) + (o_host[(f * n + t) * 2 + 1] - r[t].im).powi(2)).sqrt();
-            let en = ((n_host[(f * n + t) * 2] - r[t].re).powi(2) + (n_host[(f * n + t) * 2 + 1] - r[t].im).powi(2)).sqrt();
+            let eo = ((o_host[(f * n + t) * 2] - r[t].re).powi(2)
+                + (o_host[(f * n + t) * 2 + 1] - r[t].im).powi(2))
+            .sqrt();
+            let en = ((n_host[(f * n + t) * 2] - r[t].re).powi(2)
+                + (n_host[(f * n + t) * 2 + 1] - r[t].im).powi(2))
+            .sqrt();
             worst_o = worst_o.max(eo / mag);
             worst_n = worst_n.max(en / mag);
         }
@@ -221,29 +275,42 @@ fn main() -> Result<()> {
             .exec_c2c(&mut c_in, &mut c_out, FftDirection::Forward)
             .map_err(|e| anyhow!("cufft acc: {e:?}"))?;
         cu_stream.synchronize().map_err(|e| anyhow!("sync: {e}"))?;
-        let c_host = cu_stream.clone_dtoh(&c_out).map_err(|e| anyhow!("dtoh cufft: {e}"))?;
-        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+        let c_host = cu_stream
+            .clone_dtoh(&c_out)
+            .map_err(|e| anyhow!("dtoh cufft: {e}"))?;
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
         for t in 0..n {
             writeln!(
                 f,
                 "{n},{t},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9}",
-                input_flat[2 * t], input_flat[2 * t + 1],
-                o_host[2 * t], o_host[2 * t + 1],
-                n_host[2 * t], n_host[2 * t + 1],
-                c_host[t].x, c_host[t].y
+                input_flat[2 * t],
+                input_flat[2 * t + 1],
+                o_host[2 * t],
+                o_host[2 * t + 1],
+                n_host[2 * t],
+                n_host[2 * t + 1],
+                c_host[t].x,
+                c_host[t].y
             )?;
         }
     }
     println!("correctness vs radix-2 CPU: oxide={worst_o:.2e}  nvcc={worst_n:.2e}");
     if worst_o > 1e-3 || worst_n > 1e-3 {
-        return Err(anyhow!("correctness FAIL (oxide={worst_o:.2e} nvcc={worst_n:.2e})"));
+        return Err(anyhow!(
+            "correctness FAIL (oxide={worst_o:.2e} nvcc={worst_n:.2e})"
+        ));
     }
 
     // ---- Timing (median per-FFT us over TRIALS) ----
     for _ in 0..warmup {
         run_oxide(&o_in, &o_w, &mut o_out)?;
         run_nvcc(&n_in, &n_w, &mut n_out)?;
-        c_plan.exec_c2c(&mut c_in, &mut c_out, FftDirection::Forward).map_err(|e| anyhow!("cufft exec: {e:?}"))?;
+        c_plan
+            .exec_c2c(&mut c_in, &mut c_out, FftDirection::Forward)
+            .map_err(|e| anyhow!("cufft exec: {e:?}"))?;
     }
     core_stream.synchronize()?;
     cu_stream.synchronize().map_err(|e| anyhow!("sync: {e}"))?;
@@ -262,8 +329,12 @@ fn main() -> Result<()> {
         ts_o.push(a.elapsed_ms(&b)? as f64 * 1e-3);
 
         // nvcc (cudarc events)
-        let a = cudarc_ctx.new_event(cu_flag).map_err(|e| anyhow!("ev: {e}"))?;
-        let b = cudarc_ctx.new_event(cu_flag).map_err(|e| anyhow!("ev: {e}"))?;
+        let a = cudarc_ctx
+            .new_event(cu_flag)
+            .map_err(|e| anyhow!("ev: {e}"))?;
+        let b = cudarc_ctx
+            .new_event(cu_flag)
+            .map_err(|e| anyhow!("ev: {e}"))?;
         a.record(&cu_stream).map_err(|e| anyhow!("rec: {e}"))?;
         run_nvcc(&n_in, &n_w, &mut n_out)?;
         b.record(&cu_stream).map_err(|e| anyhow!("rec: {e}"))?;
@@ -271,10 +342,16 @@ fn main() -> Result<()> {
         ts_n.push(a.elapsed_ms(&b).map_err(|e| anyhow!("el: {e}"))? as f64 * 1e-3);
 
         // cufft (cudarc events)
-        let a = cudarc_ctx.new_event(cu_flag).map_err(|e| anyhow!("ev: {e}"))?;
-        let b = cudarc_ctx.new_event(cu_flag).map_err(|e| anyhow!("ev: {e}"))?;
+        let a = cudarc_ctx
+            .new_event(cu_flag)
+            .map_err(|e| anyhow!("ev: {e}"))?;
+        let b = cudarc_ctx
+            .new_event(cu_flag)
+            .map_err(|e| anyhow!("ev: {e}"))?;
         a.record(&cu_stream).map_err(|e| anyhow!("rec: {e}"))?;
-        c_plan.exec_c2c(&mut c_in, &mut c_out, FftDirection::Forward).map_err(|e| anyhow!("cufft: {e:?}"))?;
+        c_plan
+            .exec_c2c(&mut c_in, &mut c_out, FftDirection::Forward)
+            .map_err(|e| anyhow!("cufft: {e:?}"))?;
         b.record(&cu_stream).map_err(|e| anyhow!("rec: {e}"))?;
         b.synchronize().map_err(|e| anyhow!("sync ev: {e}"))?;
         ts_c.push(a.elapsed_ms(&b).map_err(|e| anyhow!("el: {e}"))? as f64 * 1e-3);
@@ -302,7 +379,9 @@ fn main() -> Result<()> {
 
         cu_stream.synchronize().map_err(|e| anyhow!("sync: {e}"))?;
         let t = Instant::now();
-        c_plan.exec_c2c(&mut c_in, &mut c_out, FftDirection::Forward).map_err(|e| anyhow!("cufft: {e:?}"))?;
+        c_plan
+            .exec_c2c(&mut c_in, &mut c_out, FftDirection::Forward)
+            .map_err(|e| anyhow!("cufft: {e:?}"))?;
         cu_stream.synchronize().map_err(|e| anyhow!("sync: {e}"))?;
         hs_c.push(t.elapsed().as_secs_f64());
     }
@@ -312,14 +391,32 @@ fn main() -> Result<()> {
     // us. Rows: rep,batch,trial,timer,oxide_us,nvcc_us,cufft_us.
     if let Ok(path) = std::env::var("DUMP_CSV") {
         use std::io::Write;
-        let rep: usize = std::env::var("REP").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
-        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+        let rep: usize = std::env::var("REP")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
         let pf = 1e6 / batch as f64; // total seconds -> per-FFT microseconds
         for i in 0..ts_o.len() {
-            writeln!(f, "{rep},{batch},{i},event,{:.6},{:.6},{:.6}", ts_o[i] * pf, ts_n[i] * pf, ts_c[i] * pf)?;
+            writeln!(
+                f,
+                "{rep},{batch},{i},event,{:.6},{:.6},{:.6}",
+                ts_o[i] * pf,
+                ts_n[i] * pf,
+                ts_c[i] * pf
+            )?;
         }
         for i in 0..hs_o.len() {
-            writeln!(f, "{rep},{batch},{i},host,{:.6},{:.6},{:.6}", hs_o[i] * pf, hs_n[i] * pf, hs_c[i] * pf)?;
+            writeln!(
+                f,
+                "{rep},{batch},{i},host,{:.6},{:.6},{:.6}",
+                hs_o[i] * pf,
+                hs_n[i] * pf,
+                hs_c[i] * pf
+            )?;
         }
     }
 
@@ -333,14 +430,30 @@ fn main() -> Result<()> {
     println!("  cuda-oxide : {o_us:.5} us");
     println!("  nvcc       : {n_us:.5} us");
     println!("  cuFFT      : {c_us:.5} us");
-    println!("  oxide/nvcc : {:.3}  ({})", o_us / n_us, if o_us < n_us { "OXIDE BEATS NVCC" } else { "nvcc faster" });
+    println!(
+        "  oxide/nvcc : {:.3}  ({})",
+        o_us / n_us,
+        if o_us < n_us {
+            "OXIDE BEATS NVCC"
+        } else {
+            "nvcc faster"
+        }
+    );
     println!("  oxide/cuFFT: {:.3}", o_us / c_us);
     println!("  nvcc/cuFFT : {:.3}", n_us / c_us);
     println!("  -- unified host clock (one std::Instant, all three) --");
     println!("  host cuda-oxide : {ho_us:.5} us");
     println!("  host nvcc       : {hn_us:.5} us");
     println!("  host cuFFT      : {hc_us:.5} us");
-    println!("  host oxide/nvcc : {:.3}  ({})", ho_us / hn_us, if ho_us < hn_us { "OXIDE BEATS NVCC" } else { "nvcc faster" });
+    println!(
+        "  host oxide/nvcc : {:.3}  ({})",
+        ho_us / hn_us,
+        if ho_us < hn_us {
+            "OXIDE BEATS NVCC"
+        } else {
+            "nvcc faster"
+        }
+    );
     println!("  host oxide/cuFFT: {:.3}", ho_us / hc_us);
     println!("  host nvcc/cuFFT : {:.3}", hn_us / hc_us);
     Ok(())

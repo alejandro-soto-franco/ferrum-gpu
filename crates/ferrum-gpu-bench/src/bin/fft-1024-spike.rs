@@ -44,7 +44,11 @@ fn launch(
     d_w1024: &DeviceBuffer<f32>,
     d_out: &mut DeviceBuffer<f32>,
 ) -> Result<()> {
-    let cfg = LaunchConfig { grid_dim: (batch as u32, 1, 1), block_dim: (1024, 1, 1), shared_mem_bytes: 0 };
+    let cfg = LaunchConfig {
+        grid_dim: (batch as u32, 1, 1),
+        block_dim: (1024, 1, 1),
+        shared_mem_bytes: 0,
+    };
     module.fft_c2c_1024_4step(stream, cfg, d_in, d_w32, d_w1024, d_out)?;
     Ok(())
 }
@@ -73,7 +77,15 @@ fn main() -> Result<()> {
 
         let d_in = DeviceBuffer::from_host(&stream, &flatten(&input))?;
         let mut d_out = DeviceBuffer::<f32>::zeroed(&stream, N * batch * 2)?;
-        launch(&module, stream.as_ref(), batch, &d_in, &d_w32, &d_w1024, &mut d_out)?;
+        launch(
+            &module,
+            stream.as_ref(),
+            batch,
+            &d_in,
+            &d_w32,
+            &d_w1024,
+            &mut d_out,
+        )?;
         let gpu = d_out.to_host_vec(&stream)?;
 
         let (mut worst, mut wi) = (0.0f32, 0usize);
@@ -88,10 +100,19 @@ fn main() -> Result<()> {
             }
         }
         let ok = worst <= 1e-3;
-        println!("fft_c2c_1024_4step vs CPU (batch={batch}): max_rel_err={worst:.2e} at {wi} -> {}", if ok { "PASS" } else { "FAIL" });
+        println!(
+            "fft_c2c_1024_4step vs CPU (batch={batch}): max_rel_err={worst:.2e} at {wi} -> {}",
+            if ok { "PASS" } else { "FAIL" }
+        );
         if !ok {
             let c = cpu[wi];
-            eprintln!("  worst {wi}: cpu=({:.5},{:.5}) gpu=({:.5},{:.5})", c.re, c.im, gpu[2 * wi], gpu[2 * wi + 1]);
+            eprintln!(
+                "  worst {wi}: cpu=({:.5},{:.5}) gpu=({:.5},{:.5})",
+                c.re,
+                c.im,
+                gpu[2 * wi],
+                gpu[2 * wi + 1]
+            );
             return Err(anyhow!("correctness FAIL"));
         }
     }
@@ -106,16 +127,38 @@ fn main() -> Result<()> {
     let cudarc_ctx = CudarcContext::new(0).map_err(|e| anyhow!("cudarc: {e}"))?;
     let cu_stream = cudarc_ctx.default_stream();
     let cu_in: Vec<cufft_sys::float2> = (0..total)
-        .map(|i| cufft_sys::float2 { x: (2.0 * i as f32 * 0.001).sin(), y: 0.0 })
+        .map(|i| cufft_sys::float2 {
+            x: (2.0 * i as f32 * 0.001).sin(),
+            y: 0.0,
+        })
         .collect();
-    let mut c_in = cu_stream.clone_htod(&cu_in).map_err(|e| anyhow!("htod: {e}"))?;
-    let mut c_out = cu_stream.alloc_zeros::<cufft_sys::float2>(total).map_err(|e| anyhow!("alloc: {e}"))?;
-    let cu_plan = CudaFft::plan_1d(N as i32, cufft_sys::cufftType::CUFFT_C2C, batch as i32, cu_stream.clone())
-        .map_err(|e| anyhow!("plan: {e:?}"))?;
+    let mut c_in = cu_stream
+        .clone_htod(&cu_in)
+        .map_err(|e| anyhow!("htod: {e}"))?;
+    let mut c_out = cu_stream
+        .alloc_zeros::<cufft_sys::float2>(total)
+        .map_err(|e| anyhow!("alloc: {e}"))?;
+    let cu_plan = CudaFft::plan_1d(
+        N as i32,
+        cufft_sys::cufftType::CUFFT_C2C,
+        batch as i32,
+        cu_stream.clone(),
+    )
+    .map_err(|e| anyhow!("plan: {e:?}"))?;
 
     for _ in 0..WARMUP {
-        launch(&module, stream.as_ref(), batch, &d_in, &d_w32, &d_w1024, &mut d_out)?;
-        cu_plan.exec_c2c(&mut c_in, &mut c_out, FftDirection::Forward).map_err(|e| anyhow!("exec: {e:?}"))?;
+        launch(
+            &module,
+            stream.as_ref(),
+            batch,
+            &d_in,
+            &d_w32,
+            &d_w1024,
+            &mut d_out,
+        )?;
+        cu_plan
+            .exec_c2c(&mut c_in, &mut c_out, FftDirection::Forward)
+            .map_err(|e| anyhow!("exec: {e:?}"))?;
     }
     stream.synchronize()?;
     cu_stream.synchronize().map_err(|e| anyhow!("sync: {e}"))?;
@@ -128,15 +171,29 @@ fn main() -> Result<()> {
         let s = ctx.new_event(flag)?;
         let e = ctx.new_event(flag)?;
         s.record(&stream)?;
-        launch(&module, stream.as_ref(), batch, &d_in, &d_w32, &d_w1024, &mut d_out)?;
+        launch(
+            &module,
+            stream.as_ref(),
+            batch,
+            &d_in,
+            &d_w32,
+            &d_w1024,
+            &mut d_out,
+        )?;
         e.record(&stream)?;
         e.synchronize()?;
         ours.push(s.elapsed_ms(&e)? as f64 * 1.0e-3);
 
-        let cs = cudarc_ctx.new_event(cflag).map_err(|e| anyhow!("ev: {e}"))?;
-        let ce = cudarc_ctx.new_event(cflag).map_err(|e| anyhow!("ev: {e}"))?;
+        let cs = cudarc_ctx
+            .new_event(cflag)
+            .map_err(|e| anyhow!("ev: {e}"))?;
+        let ce = cudarc_ctx
+            .new_event(cflag)
+            .map_err(|e| anyhow!("ev: {e}"))?;
         cs.record(&cu_stream).map_err(|e| anyhow!("rec: {e}"))?;
-        cu_plan.exec_c2c(&mut c_in, &mut c_out, FftDirection::Forward).map_err(|e| anyhow!("exec: {e:?}"))?;
+        cu_plan
+            .exec_c2c(&mut c_in, &mut c_out, FftDirection::Forward)
+            .map_err(|e| anyhow!("exec: {e:?}"))?;
         ce.record(&cu_stream).map_err(|e| anyhow!("rec: {e}"))?;
         ce.synchronize().map_err(|e| anyhow!("sync: {e}"))?;
         cu.push(cs.elapsed_ms(&ce).map_err(|e| anyhow!("el: {e}"))? as f64 * 1.0e-3);
@@ -145,6 +202,9 @@ fn main() -> Result<()> {
     let c_us = median(cu) * 1.0e6 / batch as f64;
     println!("four-step-1024 : {o_us:.4} us/FFT");
     println!("cuFFT          : {c_us:.4} us/FFT");
-    println!("ratio (ours/cuFFT): {:.3}  (fallback was ~5.88; gate <= 0.9)", o_us / c_us);
+    println!(
+        "ratio (ours/cuFFT): {:.3}  (fallback was ~5.88; gate <= 0.9)",
+        o_us / c_us
+    );
     Ok(())
 }

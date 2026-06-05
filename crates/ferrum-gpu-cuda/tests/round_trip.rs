@@ -2,8 +2,8 @@
 //! `FERRUM_GPU_HAS_CUDA=1` plus a working NVIDIA driver + CUDA 12.x.
 
 use cudarc::driver::CudaContext;
-use ferrum_gpu_cuda::Cuda;
 use ferrum_gpu_core::Backend;
+use ferrum_gpu_cuda::Cuda;
 
 fn gpu_available() -> bool {
     std::env::var("FERRUM_GPU_HAS_CUDA")

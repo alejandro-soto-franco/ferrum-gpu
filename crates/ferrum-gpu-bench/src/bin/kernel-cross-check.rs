@@ -97,7 +97,10 @@ fn check_specialised_4096(
         let c = cpu[idx];
         eprintln!(
             "  worst bin {idx}: cpu=({:.5}, {:.5}) gpu=({:.5}, {:.5})",
-            c.re, c.im, gpu[2 * idx], gpu[2 * idx + 1]
+            c.re,
+            c.im,
+            gpu[2 * idx],
+            gpu[2 * idx + 1]
         );
     }
     Ok(pass)
@@ -123,7 +126,11 @@ fn check_specialised_1024(
     let dbuf_in = DeviceBuffer::from_host(&stream, &flatten(&input))?;
     let dbuf_tw = DeviceBuffer::from_host(&stream, &flatten(&plan.kernel_twiddles()))?;
     let mut dbuf_out = DeviceBuffer::<f32>::zeroed(&stream, total * 2)?;
-    let cfg = LaunchConfig { grid_dim: (batch as u32, 1, 1), block_dim: (256, 1, 1), shared_mem_bytes: 0 };
+    let cfg = LaunchConfig {
+        grid_dim: (batch as u32, 1, 1),
+        block_dim: (256, 1, 1),
+        shared_mem_bytes: 0,
+    };
     module.fft_c2c_1024(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
     let gpu = dbuf_out.to_host_vec(&stream)?;
 
@@ -156,7 +163,11 @@ fn check_specialised_256(
     let dbuf_in = DeviceBuffer::from_host(&stream, &flatten(&input))?;
     let dbuf_tw = DeviceBuffer::from_host(&stream, &flatten(&plan.kernel_twiddles()))?;
     let mut dbuf_out = DeviceBuffer::<f32>::zeroed(&stream, total * 2)?;
-    let cfg = LaunchConfig { grid_dim: (batch as u32, 1, 1), block_dim: (64, 1, 1), shared_mem_bytes: 0 };
+    let cfg = LaunchConfig {
+        grid_dim: (batch as u32, 1, 1),
+        block_dim: (64, 1, 1),
+        shared_mem_bytes: 0,
+    };
     module.fft_c2c_256(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
     let gpu = dbuf_out.to_host_vec(&stream)?;
 

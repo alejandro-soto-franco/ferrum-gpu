@@ -21,8 +21,8 @@ use anyhow::{Result, anyhow};
 use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
 use cudarc::cufft::{CudaFft, FftDirection, sys as cufft_sys};
 use cudarc::driver::CudaContext as CudarcContext;
-use ferrum_gpu_fft::layout_study::{dft_naive_interleaved, interleaved_to_split};
 use ferrum_gpu_fft::Plan;
+use ferrum_gpu_fft::layout_study::{dft_naive_interleaved, interleaved_to_split};
 
 include!("../../../ferrum-gpu-fft-kernels/src/kernels_body.rs");
 
@@ -51,7 +51,11 @@ fn make_input(total: usize) -> Vec<f32> {
 
 fn cfg_for(n: usize, batch: usize) -> LaunchConfig {
     let block = if n == 256 { 32 } else { 256 };
-    LaunchConfig { grid_dim: (batch as u32, 1, 1), block_dim: (block, 1, 1), shared_mem_bytes: 0 }
+    LaunchConfig {
+        grid_dim: (batch as u32, 1, 1),
+        block_dim: (block, 1, 1),
+        shared_mem_bytes: 0,
+    }
 }
 
 /// Twiddle device buffer for the given N. 256 and 4096 use the unit-root table;
@@ -62,7 +66,10 @@ fn twiddles_for(n: usize, stream: &cuda_core::CudaStream) -> Result<DeviceBuffer
         4096 => w_table(4096, 4096),
         1024 => {
             let plan = Plan::new(10, 1, false);
-            plan.kernel_twiddles().iter().flat_map(|c| [c.re, c.im]).collect()
+            plan.kernel_twiddles()
+                .iter()
+                .flat_map(|c| [c.re, c.im])
+                .collect()
         }
         _ => return Err(anyhow!("unsupported N {n}")),
     };
@@ -178,7 +185,17 @@ fn main() -> Result<()> {
 
             // --- run both once for correctness ---
             launch_inter(&module, stream.as_ref(), n, cfg, &d_in, &tw, &mut d_out)?;
-            launch_split(&module, stream.as_ref(), n, cfg, &d_re, &d_im, &tw, &mut d_ore, &mut d_oim)?;
+            launch_split(
+                &module,
+                stream.as_ref(),
+                n,
+                cfg,
+                &d_re,
+                &d_im,
+                &tw,
+                &mut d_ore,
+                &mut d_oim,
+            )?;
             stream.synchronize()?;
             let out_i = d_out.to_host_vec(&stream)?;
             let out_re = d_ore.to_host_vec(&stream)?;
@@ -189,7 +206,9 @@ fn main() -> Result<()> {
             for k in 0..total {
                 let dr = (out_re[k] - out_i[2 * k]).abs();
                 let di = (out_im[k] - out_i[2 * k + 1]).abs();
-                let scale = (out_i[2 * k].powi(2) + out_i[2 * k + 1].powi(2)).sqrt().max(1.0);
+                let scale = (out_i[2 * k].powi(2) + out_i[2 * k + 1].powi(2))
+                    .sqrt()
+                    .max(1.0);
                 worst = worst.max((dr.max(di)) / scale);
             }
             if worst > 1e-3 {
@@ -204,7 +223,9 @@ fn main() -> Result<()> {
                     let e = ((out_i[2 * k] - oracle[2 * k]).powi(2)
                         + (out_i[2 * k + 1] - oracle[2 * k + 1]).powi(2))
                     .sqrt();
-                    let sc = (oracle[2 * k].powi(2) + oracle[2 * k + 1].powi(2)).sqrt().max(1.0);
+                    let sc = (oracle[2 * k].powi(2) + oracle[2 * k + 1].powi(2))
+                        .sqrt()
+                        .max(1.0);
                     wo = wo.max(e / sc);
                 }
                 if wo > 1e-2 {
@@ -222,16 +243,33 @@ fn main() -> Result<()> {
             // --- timing: interleaved, split ---
             let mut li = || launch_inter(&module, stream.as_ref(), n, cfg, &d_in, &tw, &mut d_out);
             let t_i = event_time(&mut li)?;
-            let mut ls = || launch_split(&module, stream.as_ref(), n, cfg, &d_re, &d_im, &tw, &mut d_ore, &mut d_oim);
+            let mut ls = || {
+                launch_split(
+                    &module,
+                    stream.as_ref(),
+                    n,
+                    cfg,
+                    &d_re,
+                    &d_im,
+                    &tw,
+                    &mut d_ore,
+                    &mut d_oim,
+                )
+            };
             let t_s = event_time(&mut ls)?;
 
             // --- cuFFT anchor (interleaved input) ---
             let cudarc_ctx = CudarcContext::new(0).map_err(|e| anyhow!("cudarc: {e}"))?;
             let cu_stream = cudarc_ctx.default_stream();
             let cu_in: Vec<cufft_sys::float2> = (0..total)
-                .map(|i| cufft_sys::float2 { x: inp[2 * i], y: inp[2 * i + 1] })
+                .map(|i| cufft_sys::float2 {
+                    x: inp[2 * i],
+                    y: inp[2 * i + 1],
+                })
                 .collect();
-            let mut c_in = cu_stream.clone_htod(&cu_in).map_err(|e| anyhow!("htod: {e}"))?;
+            let mut c_in = cu_stream
+                .clone_htod(&cu_in)
+                .map_err(|e| anyhow!("htod: {e}"))?;
             let mut c_out = cu_stream
                 .alloc_zeros::<cufft_sys::float2>(total)
                 .map_err(|e| anyhow!("alloc: {e}"))?;
@@ -251,8 +289,12 @@ fn main() -> Result<()> {
             cu_stream.synchronize().map_err(|e| anyhow!("sync: {e}"))?;
             let mut cu = Vec::with_capacity(TRIALS);
             for _ in 0..TRIALS {
-                let cs = cudarc_ctx.new_event(cflag).map_err(|e| anyhow!("ev: {e}"))?;
-                let ce = cudarc_ctx.new_event(cflag).map_err(|e| anyhow!("ev: {e}"))?;
+                let cs = cudarc_ctx
+                    .new_event(cflag)
+                    .map_err(|e| anyhow!("ev: {e}"))?;
+                let ce = cudarc_ctx
+                    .new_event(cflag)
+                    .map_err(|e| anyhow!("ev: {e}"))?;
                 cs.record(&cu_stream).map_err(|e| anyhow!("rec: {e}"))?;
                 cu_plan
                     .exec_c2c(&mut c_in, &mut c_out, FftDirection::Forward)
@@ -266,8 +308,18 @@ fn main() -> Result<()> {
             let us = |t: f64| t * 1.0e6 / batch as f64;
             let gpts = |t: f64| (total as f64) / t / 1.0e9;
             let cu_us = us(cu_med);
-            println!("{n},{batch},interleaved,{:.5},{:.5},{:.4}", us(t_i), cu_us, gpts(t_i));
-            println!("{n},{batch},split,{:.5},{:.5},{:.4}", us(t_s), cu_us, gpts(t_s));
+            println!(
+                "{n},{batch},interleaved,{:.5},{:.5},{:.4}",
+                us(t_i),
+                cu_us,
+                gpts(t_i)
+            );
+            println!(
+                "{n},{batch},split,{:.5},{:.5},{:.4}",
+                us(t_s),
+                cu_us,
+                gpts(t_s)
+            );
         }
     }
     Ok(())

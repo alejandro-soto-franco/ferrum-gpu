@@ -58,8 +58,7 @@ fn median(mut xs: Vec<f64>) -> f64 {
 /// (cuda-oxide PTX embedding constraint).
 pub fn init_cuda_contexts() -> Result<(Arc<CudaContext>, Arc<CudarcContext>)> {
     let core_ctx = CudaContext::new(0)?;
-    let cudarc_ctx =
-        CudarcContext::new(0).map_err(|e| anyhow!("cudarc CudaContext::new: {e}"))?;
+    let cudarc_ctx = CudarcContext::new(0).map_err(|e| anyhow!("cudarc CudaContext::new: {e}"))?;
     Ok((core_ctx, cudarc_ctx))
 }
 
@@ -202,8 +201,14 @@ pub fn alternating_bench_batch(
     let wall_mean_s = t0.elapsed().as_secs_f64() / (2.0 * TRIALS as f64);
 
     Ok((
-        BenchSample { event_med_s: median(f_event_samples_s), wall_mean_s },
-        BenchSample { event_med_s: median(c_event_samples_s), wall_mean_s },
+        BenchSample {
+            event_med_s: median(f_event_samples_s),
+            wall_mean_s,
+        },
+        BenchSample {
+            event_med_s: median(c_event_samples_s),
+            wall_mean_s,
+        },
     ))
 }
 

@@ -17,7 +17,9 @@ fn cpu_roundtrip_n4() {
         let dim = a.im - b.im;
         assert!(
             dre.abs() < 1e-4 && dim.abs() < 1e-4,
-            "roundtrip mismatch at {i}: expected {:?}, got {:?}", a, b
+            "roundtrip mismatch at {i}: expected {:?}, got {:?}",
+            a,
+            b
         );
     }
 }
@@ -37,7 +39,9 @@ fn cpu_roundtrip_n8() {
         let dim = a.im - b.im;
         assert!(
             dre.abs() < 1e-4 && dim.abs() < 1e-4,
-            "n=8 roundtrip mismatch at {i}: expected {:?}, got {:?}", a, b
+            "n=8 roundtrip mismatch at {i}: expected {:?}, got {:?}",
+            a,
+            b
         );
     }
 }
@@ -57,7 +61,9 @@ fn cpu_roundtrip_n256() {
         let dim = a.im - b.im;
         assert!(
             dre.abs() < 1e-3 && dim.abs() < 1e-3,
-            "n=256 roundtrip mismatch at {i}: expected {:?}, got {:?}", a, b
+            "n=256 roundtrip mismatch at {i}: expected {:?}, got {:?}",
+            a,
+            b
         );
     }
 }

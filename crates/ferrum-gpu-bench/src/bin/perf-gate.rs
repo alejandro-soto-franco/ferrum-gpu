@@ -9,8 +9,8 @@
 use anyhow::Result;
 
 use ferrum_gpu_bench::{
-    BATCH, alternating_bench, fallback_launch_cfg, init_cuda_contexts, spec1024_launch_cfg,
-    spec256_launch_cfg, spec4096_launch_cfg,
+    BATCH, alternating_bench, fallback_launch_cfg, init_cuda_contexts, spec256_launch_cfg,
+    spec1024_launch_cfg, spec4096_launch_cfg,
 };
 use ferrum_gpu_fft::KernelKind;
 

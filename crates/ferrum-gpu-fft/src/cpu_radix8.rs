@@ -195,8 +195,7 @@ mod tests {
             let mut scratch = vec![0.0f32; 2 * n];
             let mut got = vec![Complex32::zero(); n * batch];
             for (lane_idx, lane) in input.chunks(n).enumerate() {
-                let mut flat: Vec<f32> =
-                    lane.iter().flat_map(|c| [c.re, c.im]).collect();
+                let mut flat: Vec<f32> = lane.iter().flat_map(|c| [c.re, c.im]).collect();
                 radix8_forward_lane(&mut flat, &mut scratch, log_n, &tw);
                 for i in 0..n {
                     got[lane_idx * n + i] = Complex32::new(flat[2 * i], flat[2 * i + 1]);

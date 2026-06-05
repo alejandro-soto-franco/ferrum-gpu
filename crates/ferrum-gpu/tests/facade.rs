@@ -1,14 +1,18 @@
 //! Integration test crate.
 
-use ferrum_gpu::{cuda, Device};
+use ferrum_gpu::{Device, cuda};
 
 fn gpu_available() -> bool {
-    std::env::var("FERRUM_GPU_HAS_CUDA").map(|v| v == "1").unwrap_or(false)
+    std::env::var("FERRUM_GPU_HAS_CUDA")
+        .map(|v| v == "1")
+        .unwrap_or(false)
 }
 
 #[test]
 fn facade_round_trip() {
-    if !gpu_available() { return; }
+    if !gpu_available() {
+        return;
+    }
     let dev: Device<cuda::Cuda> = cuda::Device::new(0).expect("cuda device 0");
     let n = 256;
     let mut buf = dev.alloc::<f32>(n).expect("alloc");

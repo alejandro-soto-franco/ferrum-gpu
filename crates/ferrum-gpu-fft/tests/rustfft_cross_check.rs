@@ -8,9 +8,14 @@ fn run_rustfft_forward(input: &[Complex32]) -> Vec<Complex32> {
     let mut planner = FftPlanner::new();
     let n = input.len();
     let fft = planner.plan_fft_forward(n);
-    let mut buf: Vec<RustComplex32> = input.iter().map(|c| RustComplex32::new(c.re, c.im)).collect();
+    let mut buf: Vec<RustComplex32> = input
+        .iter()
+        .map(|c| RustComplex32::new(c.re, c.im))
+        .collect();
     fft.process(&mut buf);
-    buf.into_iter().map(|c| Complex32::new(c.re, c.im)).collect()
+    buf.into_iter()
+        .map(|c| Complex32::new(c.re, c.im))
+        .collect()
 }
 
 #[test]
@@ -31,7 +36,11 @@ fn cross_check_n4_n8_n64() {
             assert!(
                 rel < 1e-4,
                 "log_n={log_n} mismatch at {i}: got ({}, {}), expected ({}, {}), rel={}",
-                buf[i].re, buf[i].im, expected[i].re, expected[i].im, rel
+                buf[i].re,
+                buf[i].im,
+                expected[i].re,
+                expected[i].im,
+                rel
             );
         }
     }

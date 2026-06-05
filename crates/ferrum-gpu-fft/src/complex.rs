@@ -17,6 +17,7 @@ pub struct Complex32 {
     pub im: f32,
 }
 
+#[allow(clippy::should_implement_trait)]
 impl Complex32 {
     /// Construct from real + imag.
     pub const fn new(re: f32, im: f32) -> Self {
@@ -54,7 +55,10 @@ impl Complex32 {
 
     /// Conjugate (used to switch direction without rebuilding twiddles).
     pub fn conj(self) -> Self {
-        Self { re: self.re, im: -self.im }
+        Self {
+            re: self.re,
+            im: -self.im,
+        }
     }
 
     /// Convert to num_complex.

@@ -150,7 +150,10 @@ mod tests {
                 let (a, b) = (reference[i], got[i]);
                 let err = ((a.re - b.re).powi(2) + (a.im - b.im).powi(2)).sqrt();
                 let scale = (a.re * a.re + a.im * a.im).sqrt().max(1.0);
-                assert!(err / scale < 1e-3, "log_n={log_n} i={i}: ref={a:?} got={b:?}");
+                assert!(
+                    err / scale < 1e-3,
+                    "log_n={log_n} i={i}: ref={a:?} got={b:?}"
+                );
             }
         }
     }

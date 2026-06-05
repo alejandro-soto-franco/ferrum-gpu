@@ -73,8 +73,5 @@ pub trait Backend: 'static + Send + Sync + Sized {
     fn default_stream(dev: &Self::DeviceHandle) -> Self::Stream;
 
     /// Block the calling thread until all work on `stream` completes.
-    fn sync_stream(
-        dev: &Self::DeviceHandle,
-        stream: &Self::Stream,
-    ) -> Result<(), Self::Error>;
+    fn sync_stream(dev: &Self::DeviceHandle, stream: &Self::Stream) -> Result<(), Self::Error>;
 }

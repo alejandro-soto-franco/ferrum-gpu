@@ -16,15 +16,13 @@ extern crate alloc;
 extern crate std;
 
 pub mod artifact;
+pub mod backend;
 pub mod dim;
 pub mod error;
-pub mod backend;
 pub mod launch;
 
-pub use artifact::{
-    ArgKind, BackendCaps, BackendId, KernelArtifact, KernelMeta, TargetInfo,
-};
+pub use artifact::{ArgKind, BackendCaps, BackendId, KernelArtifact, KernelMeta, TargetInfo};
+pub use backend::Backend;
 pub use dim::{Dim3, Direction};
 pub use error::{FerrumGpuError, Result};
-pub use backend::Backend;
 pub use launch::{AnyBufferHandle, BufferArg, LaunchArg, LaunchArgs};

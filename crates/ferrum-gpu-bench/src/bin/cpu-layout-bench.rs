@@ -10,9 +10,10 @@
 use std::time::Instant;
 
 use ferrum_gpu_bench::cpu_layout::{
-    cmul_interleaved, cmul_soa, split_radix_interleaved, split_radix_soa,
+    bit_reverse_table, cmul_interleaved, cmul_soa, fft_iter_interleaved, fft_iter_soa,
+    split_radix_interleaved, split_radix_soa, twiddle_table,
 };
-use rustfft::{num_complex::Complex, FftPlanner};
+use rustfft::{FftPlanner, num_complex::Complex};
 
 const REPS: usize = 11;
 
@@ -43,6 +44,11 @@ fn main() {
     for &n in &ns {
         let mut planner = FftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(n);
+
+        // Precomputed once per N, outside every timed region: the allocation-free
+        // iterative FFT arm must see zero malloc in its hot loop.
+        let brev = bit_reverse_table(n);
+        let tw = twiddle_table(n);
 
         for &batch in &batches {
             // ---- data ----
@@ -86,10 +92,30 @@ fn main() {
             row("fft_handroll", "interleaved", t_inter, batch as f64);
             row("fft_handroll", "soa", t_soa, batch as f64);
 
+            // ---- arm 1b: allocation-free iterative radix-2, layout isolated ----
+            // Same buffers (out_i, ore, oim), brev, tw reused across the timed
+            // loop: no allocation inside, so the ratio is pure cache-adjacency.
+            let t_iter_i = time(|| {
+                for x in &inter {
+                    fft_iter_interleaved(x, &mut out_i, &brev, &tw);
+                }
+            });
+            let t_iter_s = time(|| {
+                for (re, im) in &split {
+                    fft_iter_soa(re, im, &mut ore, &mut oim, &brev, &tw);
+                }
+            });
+            row("fft_iter", "interleaved", t_iter_i, batch as f64);
+            row("fft_iter", "soa", t_iter_s, batch as f64);
+
             // ---- arm 2: rustfft native vs split-tax ----
             let mut bufs: Vec<Vec<Complex<f32>>> = inter
                 .iter()
-                .map(|x| (0..n).map(|i| Complex::new(x[2 * i], x[2 * i + 1])).collect())
+                .map(|x| {
+                    (0..n)
+                        .map(|i| Complex::new(x[2 * i], x[2 * i + 1]))
+                        .collect()
+                })
                 .collect();
             let t_native = time(|| {
                 for buf in bufs.iter_mut() {
