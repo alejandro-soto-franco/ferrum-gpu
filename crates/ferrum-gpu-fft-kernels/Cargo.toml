@@ -1,6 +1,6 @@
 [package]
 name = "ferrum-gpu-fft-kernels"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "Apache-2.0"
 description = "Specialised cuda-oxide FFT kernels for ferrum-gpu-fft."
@@ -11,4 +11,4 @@ anyhow = "1"
 cuda-core = { workspace = true }
 cuda-device = { workspace = true }
 cuda-host = { workspace = true }
-ferrum-gpu-fft = { path = "../ferrum-gpu-fft", version = "0.2.0" }
+ferrum-gpu-fft = { path = "../ferrum-gpu-fft", version = "0.3.0" }

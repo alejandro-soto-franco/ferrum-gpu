@@ -14,7 +14,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.85"
 authors = ["Alejandro Soto Franco <sotofranco.eng@gmail.com>"]
@@ -24,10 +24,10 @@ homepage = "https://github.com/alejandro-soto-franco/ferrum-gpu"
 documentation = "https://docs.rs/ferrum-gpu"
 
 [workspace.dependencies]
-ferrum-gpu-core = { version = "0.2.0", path = "crates/ferrum-gpu-core" }
-ferrum-gpu-cuda = { version = "0.2.0", path = "crates/ferrum-gpu-cuda" }
-ferrum-gpu = { version = "0.2.0", path = "crates/ferrum-gpu" }
-ferrum-gpu-fft = { version = "0.2.0", path = "crates/ferrum-gpu-fft" }
+ferrum-gpu-core = { version = "0.3.0", path = "crates/ferrum-gpu-core" }
+ferrum-gpu-cuda = { version = "0.3.0", path = "crates/ferrum-gpu-cuda" }
+ferrum-gpu = { version = "0.3.0", path = "crates/ferrum-gpu" }
+ferrum-gpu-fft = { version = "0.3.0", path = "crates/ferrum-gpu-fft" }
 
 bytemuck = { version = "1", features = ["derive"] }
 cudarc = { version = "0.19", default-features = false, features = ["std", "driver", "nvrtc", "cuda-13010", "dynamic-loading"] }
