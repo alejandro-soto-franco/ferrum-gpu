@@ -25,5 +25,3 @@ build/
 *.ll
 *.ptx
 
-# Wolf (gitignored per project hygiene)
-.wolf/
