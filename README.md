@@ -1,6 +1,6 @@
 # ferrum-gpu
 
-Pure-Rust GPU compute substrate with Python bindings. FFT kernels run on NVIDIA GPUs today via [cuda-oxide](https://github.com/NVlabs/cuda-oxide) (Rust source compiled to PTX, no CUDA C). Cross-vendor support via spirv-oxide → Vulkan is the v0.2 roadmap.
+Pure-Rust GPU compute substrate with Python bindings. FFT kernels run on NVIDIA GPUs today via [cuda-oxide](https://github.com/NVIDIA/cuda-rust/tree/main/cuda-oxide) (Rust source compiled to PTX, no CUDA C). Cross-vendor support via spirv-oxide → Vulkan is the v0.2 roadmap.
 
 `v0.1.0` is live on PyPI:
 
@@ -50,7 +50,7 @@ The wheel does not bundle `libcuda`; users need the NVIDIA driver installed.
 - CUDA Toolkit 13.x
 - NVIDIA driver compatible with the installed Toolkit
 - Rust nightly `2026-04-03` (pinned via `rust-toolchain.toml`)
-- `cargo-oxide`: `cargo install --git https://github.com/NVlabs/cuda-oxide.git cargo-oxide`
+- `cargo-oxide`: `cargo install --git https://github.com/NVIDIA/cuda-rust cargo-oxide`
 - For the Python bindings: Python 3.10+ with `maturin` + `pytest` + `numpy`
 
 ## Quick start: vector-add via hand-written PTX
@@ -69,7 +69,7 @@ vector_add: 1048576 elements verified
 ## Quick start: vector-add via Rust source + cuda-oxide
 
 ```bash
-cargo install --git https://github.com/NVlabs/cuda-oxide.git cargo-oxide
+cargo install --git https://github.com/NVIDIA/cuda-rust cargo-oxide
 cargo oxide doctor       # one-time codegen-backend bootstrap
 make example-vector-add-oxide
 ```

@@ -5,7 +5,7 @@
 # (github.com/alejandro-soto-franco/cuda-oxide) rather than the stale standalone
 # at ~/.cargo/cuda-oxide: the fork carries the fail-loud miscompile fixes and
 # correctly lowers the kernels the wheel ships (u64-coalesced IO, f32::from_bits,
-# mul_add). Build it with `cd ~/cuda-oxide/crates/rustc-codegen-cuda && cargo build`.
+# mul_add). Build it with `cd ~/cuda-rust/cuda-oxide/crates/rustc-codegen-cuda && cargo build`.
 # Override FERRUM_GPU_BACKEND to use a different .so.
 FERRUM_GPU_BACKEND ?= $(HOME)/cuda-oxide/crates/rustc-codegen-cuda/target/debug/librustc_codegen_cuda.so
 
