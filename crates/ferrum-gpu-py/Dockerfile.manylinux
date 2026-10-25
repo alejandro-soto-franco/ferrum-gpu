@@ -1,5 +1,5 @@
-# manylinux_2_28_x86_64 base + CUDA Toolkit 13.x + Rust nightly-2026-04-03 +
-# cargo-oxide + maturin. Used to build the public PyPI wheel.
+# manylinux_2_28_x86_64 base + CUDA Toolkit 13.x + Rust 1.99.1 + the
+# cuda-oxide codegen backend + maturin. Used to build the public PyPI wheel.
 #
 # Build:   docker build -f crates/ferrum-gpu-py/Dockerfile.manylinux \
 #                       -t ferrum-gpu-builder:latest crates/ferrum-gpu-py
@@ -25,7 +25,7 @@
 
 FROM quay.io/pypa/manylinux_2_28_x86_64:latest
 
-# Pin rustc nightly: the same version cuda-oxide pins.
+# Pin rustc to the release cuda-oxide pins.
 ENV RUSTUP_HOME=/root/.rustup CARGO_HOME=/root/.cargo
 ENV PATH="/root/.cargo/bin:${PATH}"
 
@@ -47,29 +47,26 @@ ENV PATH="/usr/local/cuda/bin:${PATH}" \
 RUN dnf -y install clang clang-devel llvm-devel && dnf clean all
 ENV LIBCLANG_PATH=/usr/lib64
 
-# Install Rust nightly-2026-04-03 + components.
+# Install Rust 1.99.1 + components. llvm-tools provides the `llc` that
+# cuda-oxide prefers for PTX.
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
-      sh -s -- -y --default-toolchain nightly-2026-04-03 \
+      sh -s -- -y --default-toolchain 1.99.1 \
         --component rust-src --component rustc-dev --component llvm-tools \
         --component clippy
 
-# Install cargo-oxide AND the codegen backend from the personal fork
-# (github.com/alejandro-soto-franco/cuda-oxide), which carries the fail-loud
-# miscompile fixes and correctly lowers the kernels the wheel ships
-# (u64-coalesced IO, f32::from_bits). Override OXIDE_FORK to build from a
-# different remote. The build respects each repo's rust-toolchain.toml
-# (nightly-2026-04-03).
-ARG OXIDE_FORK=https://github.com/alejandro-soto-franco/cuda-oxide.git
-RUN cargo install --git ${OXIDE_FORK} cargo-oxide
-
-# Build the fork's codegen backend EXPLICITLY rather than via `cargo oxide
-# setup` (which would bootstrap whatever backend cargo-oxide defaults to, not
-# necessarily the fork's). rustc-codegen-cuda is a nested workspace; its
-# rust-toolchain.toml pins the same nightly + rustc-dev. The wheel's RUSTFLAGS
-# point maturin at the resulting .so (see build-wheel.sh), so we stage it at
-# the conventional cache path.
-RUN git clone --depth 1 ${OXIDE_FORK} /opt/cuda-oxide-fork && \
-    cd /opt/cuda-oxide-fork/crates/rustc-codegen-cuda && \
+# Build the cuda-oxide codegen backend from NVIDIA/cuda-rust at the revision
+# the workspace's cuda-device, cuda-host and cuda-core pin (Cargo.toml). The
+# backend must come from the same revision as those crates and be built by
+# the same rustc that loads it. cuda-oxide/rust-toolchain.toml pins 1.99.1,
+# and cuda-oxide/.cargo/config.toml sets RUSTC_BOOTSTRAP=1 for rustc_private.
+# The wheel's RUSTFLAGS point maturin at the resulting .so (see
+# build-wheel.sh), staged at the conventional cache path.
+ARG CUDA_RUST=https://github.com/NVIDIA/cuda-rust.git
+ARG CUDA_RUST_REV=9df9e7cef561e03a066230b3bb433b3d8285da81
+RUN git init -q /opt/cuda-rust && cd /opt/cuda-rust && \
+    git fetch -q --depth 1 ${CUDA_RUST} ${CUDA_RUST_REV} && \
+    git checkout -q FETCH_HEAD && \
+    cd cuda-oxide/crates/rustc-codegen-cuda && \
     cargo build && \
     mkdir -p /root/.cargo/cuda-oxide && \
     cp target/debug/librustc_codegen_cuda.so \

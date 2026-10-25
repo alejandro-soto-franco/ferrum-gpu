@@ -29,18 +29,18 @@ STUBS=/usr/local/cuda/lib64/stubs
 [ -e "$STUBS/libcuda.so.1" ] || ln -sf "$STUBS/libcuda.so" "$STUBS/libcuda.so.1"
 export LD_LIBRARY_PATH="$STUBS:${LD_LIBRARY_PATH:-}"
 
-# The personal fork's codegen backend is pre-built into the image (see
-# Dockerfile.manylinux, which clones github.com/alejandro-soto-franco/cuda-oxide
-# and builds crates/rustc-codegen-cuda). Fail loudly if it is missing rather
-# than silently falling back to a different backend.
+# The cuda-oxide codegen backend is pre-built into the image (see
+# Dockerfile.manylinux, which builds it from NVIDIA/cuda-rust at the revision
+# Cargo.toml pins). Fail loudly if it is missing rather than silently falling
+# back to a different backend.
 BACKEND=/root/.cargo/cuda-oxide/librustc_codegen_cuda.so
 if [ ! -f "$BACKEND" ]; then
-    echo "error: fork codegen backend missing at $BACKEND" >&2
+    echo "error: cuda-oxide codegen backend missing at $BACKEND" >&2
     echo "       rebuild the image from Dockerfile.manylinux." >&2
     exit 1
 fi
 
-# RUSTFLAGS that drive maturin through the fork's codegen backend. Identical to
+# RUSTFLAGS that drive maturin through the cuda-oxide codegen backend. Identical to
 # what `cargo oxide run` sets internally, and to the local Makefile path.
 export RUSTFLAGS="-Z codegen-backend=$BACKEND -C opt-level=3 -C debug-assertions=off -Z mir-enable-passes=-JumpThreading -Csymbol-mangling-version=v0"
 
