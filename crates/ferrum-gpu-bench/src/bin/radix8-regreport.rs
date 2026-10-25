@@ -3,7 +3,8 @@
 //! just enough live-set pressure to be representative.
 
 use anyhow::Result;
-use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
+use cuda_core::{CudaContext, DeviceBuffer};
+use cuda_core::simt::LaunchConfig;
 use cuda_device::{DisjointSlice, kernel, thread};
 use cuda_host::cuda_module;
 
@@ -77,7 +78,8 @@ fn main() -> Result<()> {
         block_dim: (512, 1, 1),
         shared_mem_bytes: 0,
     };
-    module.radix8_pressure(stream.as_ref(), cfg, &dbuf_in, &mut dbuf_out)?;
+    // SAFETY: launch shape and buffers match the kernel signature.
+    unsafe { module.radix8_pressure(stream.as_ref(), cfg, &dbuf_in, &mut dbuf_out) }?;
     let _ = dbuf_out.to_host_vec(&stream)?;
     println!("radix8_pressure: ok");
     Ok(())

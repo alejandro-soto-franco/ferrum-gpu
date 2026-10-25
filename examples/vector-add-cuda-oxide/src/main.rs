@@ -8,7 +8,8 @@
 //! exposes a multi-crate kernel-bundling path.
 
 use anyhow::Result;
-use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
+use cuda_core::{CudaContext, DeviceBuffer};
+use cuda_core::simt::LaunchConfig;
 use cuda_device::{DisjointSlice, kernel, thread};
 use cuda_host::cuda_module;
 
@@ -43,7 +44,8 @@ fn main() -> Result<()> {
     let module = kernels::load(&ctx)?;
 
     println!("launching kernel");
-    module.vector_add(&stream, LaunchConfig::for_num_elems(n), &da, &db, &mut dc)?;
+    // SAFETY: launch shape and buffers match the kernel signature.
+    unsafe { module.vector_add(&stream, LaunchConfig::for_num_elems(n), &da, &db, &mut dc) }?;
 
     let c = dc.to_host_vec(&stream)?;
     for i in 0..(n as usize) {

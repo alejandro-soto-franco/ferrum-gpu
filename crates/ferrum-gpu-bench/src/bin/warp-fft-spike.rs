@@ -11,7 +11,8 @@
 use std::f32::consts::PI;
 
 use anyhow::{Result, anyhow};
-use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
+use cuda_core::{CudaContext, DeviceBuffer};
+use cuda_core::simt::LaunchConfig;
 use ferrum_gpu_fft::Complex32;
 use ferrum_gpu_fft::warp_fft::warp_fft32_model;
 
@@ -65,7 +66,8 @@ fn main() -> Result<()> {
         shared_mem_bytes: 0,
     };
 
-    module.warp_fft32(stream.as_ref(), cfg, &d_in, &d_tw, &mut d_out)?;
+    // SAFETY: launch shape and buffers match the kernel signature.
+    unsafe { module.warp_fft32(stream.as_ref(), cfg, &d_in, &d_tw, &mut d_out) }?;
     let gpu = d_out.to_host_vec(&stream)?;
 
     // Correctness: compare the first few FFTs against the CPU model.
@@ -97,7 +99,8 @@ fn main() -> Result<()> {
     // Timing (CUDA events).
     let flag = Some(cuda_core::sys::CUevent_flags_enum_CU_EVENT_DEFAULT);
     for _ in 0..WARMUP {
-        module.warp_fft32(stream.as_ref(), cfg, &d_in, &d_tw, &mut d_out)?;
+        // SAFETY: launch shape and buffers match the kernel signature.
+        unsafe { module.warp_fft32(stream.as_ref(), cfg, &d_in, &d_tw, &mut d_out) }?;
     }
     stream.synchronize()?;
     let mut samples = Vec::with_capacity(TRIALS);
@@ -105,7 +108,8 @@ fn main() -> Result<()> {
         let s = ctx.new_event(flag)?;
         let e = ctx.new_event(flag)?;
         s.record(&stream)?;
-        module.warp_fft32(stream.as_ref(), cfg, &d_in, &d_tw, &mut d_out)?;
+        // SAFETY: launch shape and buffers match the kernel signature.
+        unsafe { module.warp_fft32(stream.as_ref(), cfg, &d_in, &d_tw, &mut d_out) }?;
         e.record(&stream)?;
         e.synchronize()?;
         samples.push(s.elapsed_ms(&e)? as f64 * 1.0e-3);

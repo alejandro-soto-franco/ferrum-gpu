@@ -9,7 +9,8 @@
 use std::f32::consts::PI;
 
 use anyhow::{Result, anyhow};
-use cuda_core::{DeviceBuffer, LaunchConfig};
+use cuda_core::DeviceBuffer;
+use cuda_core::simt::LaunchConfig;
 use ferrum_gpu_bench::{alternating_bench_batch, init_cuda_contexts};
 use ferrum_gpu_fft::{Complex32, Direction, Plan};
 
@@ -64,7 +65,8 @@ fn main() -> Result<()> {
             block_dim: (32, 1, 1),
             shared_mem_bytes: 0,
         };
-        mod_r.fft_c2c_256_r16s(stream.as_ref(), cfg, &d_in, &d_w256, &mut d_out)?;
+        // SAFETY: launch shape and buffers match the kernel signature.
+        unsafe { mod_r.fft_c2c_256_r16s(stream.as_ref(), cfg, &d_in, &d_w256, &mut d_out) }?;
         let gpu = d_out.to_host_vec(&stream)?;
         let mut worst = 0.0f32;
         for f in 0..bb {
@@ -106,7 +108,8 @@ fn main() -> Result<()> {
                     _t: &DeviceBuffer<f32>,
                     dout: &mut DeviceBuffer<f32>|
          -> Result<()> {
-            mod_w.fft_c2c_256_warp(stream.as_ref(), wcfg, din, &d_w32, &d_w256, dout)?;
+            // SAFETY: launch shape and buffers match the kernel signature.
+            unsafe { mod_w.fft_c2c_256_warp(stream.as_ref(), wcfg, din, &d_w32, &d_w256, dout) }?;
             Ok(())
         };
         let (fw, cu) = alternating_bench_batch(&core_ctx, &cudarc_ctx, 8, b, warp)?;
@@ -122,7 +125,8 @@ fn main() -> Result<()> {
                   t: &DeviceBuffer<f32>,
                   dout: &mut DeviceBuffer<f32>|
          -> Result<()> {
-            mod_k.fft_c2c_256(stream.as_ref(), rcfg, din, t, dout)?;
+            // SAFETY: launch shape and buffers match the kernel signature.
+            unsafe { mod_k.fft_c2c_256(stream.as_ref(), rcfg, din, t, dout) }?;
             Ok(())
         };
         let (fr, _) = alternating_bench_batch(&core_ctx, &cudarc_ctx, 8, b, r4)?;
@@ -137,7 +141,8 @@ fn main() -> Result<()> {
                     _t: &DeviceBuffer<f32>,
                     dout: &mut DeviceBuffer<f32>|
          -> Result<()> {
-            mod_r.fft_c2c_256_r16s(stream.as_ref(), rscfg, din, &d_w256, dout)?;
+            // SAFETY: launch shape and buffers match the kernel signature.
+            unsafe { mod_r.fft_c2c_256_r16s(stream.as_ref(), rscfg, din, &d_w256, dout) }?;
             Ok(())
         };
         let (fv, _) = alternating_bench_batch(&core_ctx, &cudarc_ctx, 8, b, r16s)?;

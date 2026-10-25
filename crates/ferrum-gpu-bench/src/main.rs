@@ -47,41 +47,53 @@ fn main() -> Result<()> {
          -> Result<()> {
             match kind {
                 KernelKind::Specialised4096 => {
-                    module.fft_c2c_4096(
-                        core_stream.as_ref(),
-                        spec4096_cfg,
-                        dbuf_in,
-                        dbuf_tw,
-                        dbuf_out,
-                    )?;
+                    // SAFETY: launch shape and buffers match the kernel signature.
+                    unsafe {
+                        module.fft_c2c_4096(
+                            core_stream.as_ref(),
+                            spec4096_cfg,
+                            dbuf_in,
+                            dbuf_tw,
+                            dbuf_out,
+                        )
+                    }?;
                 }
                 KernelKind::Specialised1024 => {
-                    module.fft_c2c_1024(
-                        core_stream.as_ref(),
-                        spec1024_cfg,
-                        dbuf_in,
-                        dbuf_tw,
-                        dbuf_out,
-                    )?;
+                    // SAFETY: launch shape and buffers match the kernel signature.
+                    unsafe {
+                        module.fft_c2c_1024(
+                            core_stream.as_ref(),
+                            spec1024_cfg,
+                            dbuf_in,
+                            dbuf_tw,
+                            dbuf_out,
+                        )
+                    }?;
                 }
                 KernelKind::Specialised256 => {
-                    module.fft_c2c_256(
-                        core_stream.as_ref(),
-                        spec256_cfg,
-                        dbuf_in,
-                        dbuf_tw,
-                        dbuf_out,
-                    )?;
+                    // SAFETY: launch shape and buffers match the kernel signature.
+                    unsafe {
+                        module.fft_c2c_256(
+                            core_stream.as_ref(),
+                            spec256_cfg,
+                            dbuf_in,
+                            dbuf_tw,
+                            dbuf_out,
+                        )
+                    }?;
                 }
                 _ => {
-                    module.fft_radix2_c2c_pow2_1d_fallback(
-                        core_stream.as_ref(),
-                        fallback_cfg,
-                        dbuf_in,
-                        dbuf_tw,
-                        dbuf_out,
-                        log_n,
-                    )?;
+                    // SAFETY: launch shape and buffers match the kernel signature.
+                    unsafe {
+                        module.fft_radix2_c2c_pow2_1d_fallback(
+                            core_stream.as_ref(),
+                            fallback_cfg,
+                            dbuf_in,
+                            dbuf_tw,
+                            dbuf_out,
+                            log_n,
+                        )
+                    }?;
                 }
             }
             Ok(())

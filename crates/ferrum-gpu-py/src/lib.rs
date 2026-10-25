@@ -17,7 +17,8 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use cuda_core::embedded::{ArtifactPayloadKind, artifact_bundles_from_binary_path};
-use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
+use cuda_core::{CudaContext, DeviceBuffer};
+use cuda_core::simt::LaunchConfig;
 
 use ferrum_gpu_fft::{KernelKind, Plan, R16S_MIN_BATCH, twiddles_full_roots};
 
@@ -147,7 +148,10 @@ fn run_fft_flat_with_device(
                     block_dim: (32, 1, 1),
                     shared_mem_bytes: 0,
                 };
-                module.fft_c2c_256_r16s(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+                // SAFETY: launch shape and buffers match the kernel signature.
+                unsafe {
+                    module.fft_c2c_256_r16s(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)
+                }?;
             }
             _ => {
                 let cfg = LaunchConfig {
@@ -159,13 +163,16 @@ fn run_fft_flat_with_device(
                 // table as fft_c2c_4096_r16s but half the shared traffic, which
                 // takes N=4096 from ~1.4x cuFFT to near-parity (1.07-1.25x,
                 // occasionally winning) on sm_120. See tools/ncu/.
-                module.fft_c2c_4096_4step_reg(
-                    stream.as_ref(),
-                    cfg,
-                    &dbuf_in,
-                    &dbuf_tw,
-                    &mut dbuf_out,
-                )?;
+                // SAFETY: launch shape and buffers match the kernel signature.
+                unsafe {
+                    module.fft_c2c_4096_4step_reg(
+                        stream.as_ref(),
+                        cfg,
+                        &dbuf_in,
+                        &dbuf_tw,
+                        &mut dbuf_out,
+                    )
+                }?;
             }
         }
     } else {
@@ -176,7 +183,10 @@ fn run_fft_flat_with_device(
                     block_dim: (512, 1, 1),
                     shared_mem_bytes: 0,
                 };
-                module.fft_c2c_4096(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+                // SAFETY: launch shape and buffers match the kernel signature.
+                unsafe {
+                    module.fft_c2c_4096(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)
+                }?;
             }
             KernelKind::Specialised1024 => {
                 let cfg = LaunchConfig {
@@ -184,7 +194,10 @@ fn run_fft_flat_with_device(
                     block_dim: (256, 1, 1),
                     shared_mem_bytes: 0,
                 };
-                module.fft_c2c_1024(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+                // SAFETY: launch shape and buffers match the kernel signature.
+                unsafe {
+                    module.fft_c2c_1024(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)
+                }?;
             }
             KernelKind::Specialised256 => {
                 let cfg = LaunchConfig {
@@ -192,7 +205,10 @@ fn run_fft_flat_with_device(
                     block_dim: (64, 1, 1),
                     shared_mem_bytes: 0,
                 };
-                module.fft_c2c_256(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+                // SAFETY: launch shape and buffers match the kernel signature.
+                unsafe {
+                    module.fft_c2c_256(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)
+                }?;
             }
             _ => {
                 let block_threads = core::cmp::min(n / 2, 1024) as u32;
@@ -201,14 +217,17 @@ fn run_fft_flat_with_device(
                     block_dim: (block_threads, 1, 1),
                     shared_mem_bytes: 0,
                 };
-                module.fft_radix2_c2c_pow2_1d_fallback(
-                    stream.as_ref(),
-                    cfg,
-                    &dbuf_in,
-                    &dbuf_tw,
-                    &mut dbuf_out,
-                    log_n,
-                )?;
+                // SAFETY: launch shape and buffers match the kernel signature.
+                unsafe {
+                    module.fft_radix2_c2c_pow2_1d_fallback(
+                        stream.as_ref(),
+                        cfg,
+                        &dbuf_in,
+                        &dbuf_tw,
+                        &mut dbuf_out,
+                        log_n,
+                    )
+                }?;
             }
         }
     }
@@ -304,27 +323,39 @@ fn run_fft_2d_flat(
     };
 
     // Pass 1: row FFT into buf_b.
-    module.fft_radix2_c2c_pow2_1d_fallback(
-        stream.as_ref(),
-        fft_cfg,
-        &buf_a,
-        &dbuf_tw,
-        &mut buf_b,
-        log_n,
-    )?;
+    // SAFETY: launch shape and buffers match the kernel signature.
+    unsafe {
+        module.fft_radix2_c2c_pow2_1d_fallback(
+            stream.as_ref(),
+            fft_cfg,
+            &buf_a,
+            &dbuf_tw,
+            &mut buf_b,
+            log_n,
+        )
+    }?;
     // Transpose buf_b -> buf_a.
-    module.transpose_complex_pow2(stream.as_ref(), trans_cfg, &buf_b, &mut buf_a, log_n)?;
+    // SAFETY: launch shape and buffers match the kernel signature.
+    unsafe {
+        module.transpose_complex_pow2(stream.as_ref(), trans_cfg, &buf_b, &mut buf_a, log_n)
+    }?;
     // Pass 2: row FFT (column pass) buf_a -> buf_b.
-    module.fft_radix2_c2c_pow2_1d_fallback(
-        stream.as_ref(),
-        fft_cfg,
-        &buf_a,
-        &dbuf_tw,
-        &mut buf_b,
-        log_n,
-    )?;
+    // SAFETY: launch shape and buffers match the kernel signature.
+    unsafe {
+        module.fft_radix2_c2c_pow2_1d_fallback(
+            stream.as_ref(),
+            fft_cfg,
+            &buf_a,
+            &dbuf_tw,
+            &mut buf_b,
+            log_n,
+        )
+    }?;
     // Transpose back buf_b -> buf_a.
-    module.transpose_complex_pow2(stream.as_ref(), trans_cfg, &buf_b, &mut buf_a, log_n)?;
+    // SAFETY: launch shape and buffers match the kernel signature.
+    unsafe {
+        module.transpose_complex_pow2(stream.as_ref(), trans_cfg, &buf_b, &mut buf_a, log_n)
+    }?;
 
     let mut host_out_flat = buf_a.to_host_vec(&stream)?;
 

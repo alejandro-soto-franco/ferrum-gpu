@@ -13,7 +13,8 @@
 use std::time::Instant;
 
 use anyhow::{Result, anyhow};
-use cuda_core::{DeviceBuffer, LaunchConfig};
+use cuda_core::DeviceBuffer;
+use cuda_core::simt::LaunchConfig;
 use cudarc::cufft::{CudaFft, FftDirection, sys as cufft_sys};
 use cudarc::driver::{LaunchConfig as CuLaunchConfig, PushKernelArg};
 use ferrum_gpu_bench::init_cuda_contexts;
@@ -175,7 +176,8 @@ fn main() -> Result<()> {
                      dw: &DeviceBuffer<f32>,
                      dout: &mut DeviceBuffer<f32>|
      -> Result<()> {
-        mod_k.fft_c2c_256_r16s(core_stream.as_ref(), o_cfg, din, dw, dout)?;
+        // SAFETY: launch shape and buffers match the kernel signature.
+        unsafe { mod_k.fft_c2c_256_r16s(core_stream.as_ref(), o_cfg, din, dw, dout) }?;
         Ok(())
     };
 

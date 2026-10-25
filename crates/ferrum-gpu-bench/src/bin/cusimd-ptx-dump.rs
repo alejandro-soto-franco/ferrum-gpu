@@ -5,7 +5,8 @@
 //! `find /home/cargo-targets/ferrum-gpu -name 'cusimd_ptx_dump*.ptx' -exec cat {} \;`.
 
 use anyhow::Result;
-use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
+use cuda_core::{CudaContext, DeviceBuffer};
+use cuda_core::simt::LaunchConfig;
 use cuda_device::cusimd::CuSimd;
 use cuda_device::{DisjointSlice, kernel, thread};
 use cuda_host::cuda_module;
@@ -40,7 +41,8 @@ fn main() -> Result<()> {
         block_dim: (32, 1, 1),
         shared_mem_bytes: 0,
     };
-    module.cusimd_v4_load(stream.as_ref(), cfg, &dbuf_in, &mut dbuf_out)?;
+    // SAFETY: launch shape and buffers match the kernel signature.
+    unsafe { module.cusimd_v4_load(stream.as_ref(), cfg, &dbuf_in, &mut dbuf_out) }?;
     let out = dbuf_out.to_host_vec(&stream)?;
     assert_eq!(&out[..16], &input[..16]);
     println!("cusimd_v4_load: ok");

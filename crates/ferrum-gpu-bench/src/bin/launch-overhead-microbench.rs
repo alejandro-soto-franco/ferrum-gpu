@@ -5,7 +5,8 @@
 use std::time::Instant;
 
 use anyhow::{Result, anyhow};
-use cuda_core::{CudaContext as CoreCtx, LaunchConfig};
+use cuda_core::CudaContext as CoreCtx;
+use cuda_core::simt::LaunchConfig;
 use cuda_device::{kernel, thread};
 use cuda_host::cuda_module;
 use cudarc::driver::{CudaContext as CudarcCtx, LaunchConfig as CudarcCfg};
@@ -32,12 +33,14 @@ fn bench_core() -> Result<f64> {
         shared_mem_bytes: 0,
     };
     for _ in 0..WARMUP {
-        module.noop(stream.as_ref(), cfg)?;
+        // SAFETY: launch shape and buffers match the kernel signature.
+        unsafe { module.noop(stream.as_ref(), cfg) }?;
     }
     stream.synchronize()?;
     let t0 = Instant::now();
     for _ in 0..TRIALS {
-        module.noop(stream.as_ref(), cfg)?;
+        // SAFETY: launch shape and buffers match the kernel signature.
+        unsafe { module.noop(stream.as_ref(), cfg) }?;
     }
     stream.synchronize()?;
     Ok(t0.elapsed().as_secs_f64() / TRIALS as f64)

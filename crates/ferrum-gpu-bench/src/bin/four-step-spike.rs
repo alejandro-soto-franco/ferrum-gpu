@@ -9,7 +9,8 @@
 use std::f32::consts::PI;
 
 use anyhow::{Result, anyhow};
-use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
+use cuda_core::{CudaContext, DeviceBuffer};
+use cuda_core::simt::LaunchConfig;
 use cudarc::cufft::{CudaFft, FftDirection, sys as cufft_sys};
 use cudarc::driver::CudaContext as CudarcContext;
 use ferrum_gpu_fft::{Complex32, Direction, Plan};
@@ -54,7 +55,8 @@ fn launch(
         block_dim: (block, 1, 1),
         shared_mem_bytes: 0,
     };
-    module.fft_c2c_4096_4step(stream, cfg, d_in, d_w64, d_w4096, d_out)?;
+    // SAFETY: launch shape and buffers match the kernel signature.
+    unsafe { module.fft_c2c_4096_4step(stream, cfg, d_in, d_w64, d_w4096, d_out) }?;
     Ok(())
 }
 

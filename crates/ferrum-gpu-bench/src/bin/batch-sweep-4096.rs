@@ -4,7 +4,8 @@
 //! Run under `tools/bench-gpu-lock.sh`. env: BATCHES (default "1024,4096,16384,65536").
 
 use anyhow::{Result, anyhow};
-use cuda_core::{DeviceBuffer, LaunchConfig};
+use cuda_core::DeviceBuffer;
+use cuda_core::simt::LaunchConfig;
 use ferrum_gpu_bench::{alternating_bench_batch, init_cuda_contexts};
 use ferrum_gpu_fft::{Complex32, Direction, Plan};
 use std::f32::consts::PI;
@@ -50,7 +51,8 @@ fn main() -> Result<()> {
             block_dim: (256, 1, 1),
             shared_mem_bytes: 0,
         };
-        mod_r.fft_c2c_4096_r16s(stream.as_ref(), cfg, &d_in, &d_w4096, &mut d_out)?;
+        // SAFETY: launch shape and buffers match the kernel signature.
+        unsafe { mod_r.fft_c2c_4096_r16s(stream.as_ref(), cfg, &d_in, &d_w4096, &mut d_out) }?;
         let gpu = d_out.to_host_vec(&stream)?;
         let mut worst = 0.0f32;
         for f in 0..bb {
@@ -88,7 +90,8 @@ fn main() -> Result<()> {
             block_dim: (256, 1, 1),
             shared_mem_bytes: 0,
         };
-        mod_r.fft_c2c_4096_4step_reg(stream.as_ref(), cfg, &d_in, &d_w4096, &mut d_out)?;
+        // SAFETY: launch shape and buffers match the kernel signature.
+        unsafe { mod_r.fft_c2c_4096_4step_reg(stream.as_ref(), cfg, &d_in, &d_w4096, &mut d_out) }?;
         let gpu = d_out.to_host_vec(&stream)?;
         // Optional accuracy dump (ACC_DUMP=path): first FFT's input + four-step
         // output, scored offline against an f64 reference. Rows:
@@ -146,7 +149,8 @@ fn main() -> Result<()> {
                   t: &DeviceBuffer<f32>,
                   dout: &mut DeviceBuffer<f32>|
          -> Result<()> {
-            mod_k.fft_c2c_4096(stream.as_ref(), cfg8, din, t, dout)?;
+            // SAFETY: launch shape and buffers match the kernel signature.
+            unsafe { mod_k.fft_c2c_4096(stream.as_ref(), cfg8, din, t, dout) }?;
             Ok(())
         };
         let (f8, cu) = alternating_bench_batch(&core_ctx, &cudarc_ctx, 12, b, r8)?;
@@ -162,7 +166,8 @@ fn main() -> Result<()> {
                   _t: &DeviceBuffer<f32>,
                   dout: &mut DeviceBuffer<f32>|
          -> Result<()> {
-            mod_r.fft_c2c_4096_r16s(stream.as_ref(), cfgr, din, &d_w4096, dout)?;
+            // SAFETY: launch shape and buffers match the kernel signature.
+            unsafe { mod_r.fft_c2c_4096_r16s(stream.as_ref(), cfgr, din, &d_w4096, dout) }?;
             Ok(())
         };
         let (fr, _) = alternating_bench_batch(&core_ctx, &cudarc_ctx, 12, b, rr)?;
@@ -172,7 +177,8 @@ fn main() -> Result<()> {
                   _t: &DeviceBuffer<f32>,
                   dout: &mut DeviceBuffer<f32>|
          -> Result<()> {
-            mod_r.fft_c2c_4096_4step_reg(stream.as_ref(), cfgr, din, &d_w4096, dout)?;
+            // SAFETY: launch shape and buffers match the kernel signature.
+            unsafe { mod_r.fft_c2c_4096_4step_reg(stream.as_ref(), cfgr, din, &d_w4096, dout) }?;
             Ok(())
         };
         let (fs, _) = alternating_bench_batch(&core_ctx, &cudarc_ctx, 12, b, rs)?;

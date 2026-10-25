@@ -10,7 +10,8 @@
 use std::f32::consts::PI;
 
 use anyhow::{Result, anyhow};
-use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
+use cuda_core::{CudaContext, DeviceBuffer};
+use cuda_core::simt::LaunchConfig;
 use ferrum_gpu_fft::warp_fft::warp256_model;
 use ferrum_gpu_fft::{Complex32, Direction, Plan};
 
@@ -71,7 +72,8 @@ fn main() -> Result<()> {
         shared_mem_bytes: 0,
     };
 
-    module.fft_c2c_256_warp(stream.as_ref(), cfg, &d_in, &d_w32, &d_w256, &mut d_out)?;
+    // SAFETY: launch shape and buffers match the kernel signature.
+    unsafe { module.fft_c2c_256_warp(stream.as_ref(), cfg, &d_in, &d_w32, &d_w256, &mut d_out) }?;
     let gpu = d_out.to_host_vec(&stream)?;
 
     // Correctness vs BOTH oracles, over all BATCH FFTs.
@@ -112,7 +114,10 @@ fn main() -> Result<()> {
     // Rough event-timed throughput (NOT the cuFFT head-to-head; see perf-gate).
     let flag = Some(cuda_core::sys::CUevent_flags_enum_CU_EVENT_DEFAULT);
     for _ in 0..WARMUP {
-        module.fft_c2c_256_warp(stream.as_ref(), cfg, &d_in, &d_w32, &d_w256, &mut d_out)?;
+        // SAFETY: launch shape and buffers match the kernel signature.
+        unsafe {
+            module.fft_c2c_256_warp(stream.as_ref(), cfg, &d_in, &d_w32, &d_w256, &mut d_out)
+        }?;
     }
     stream.synchronize()?;
     let mut samples = Vec::with_capacity(TRIALS);
@@ -120,7 +125,10 @@ fn main() -> Result<()> {
         let s = ctx.new_event(flag)?;
         let e = ctx.new_event(flag)?;
         s.record(&stream)?;
-        module.fft_c2c_256_warp(stream.as_ref(), cfg, &d_in, &d_w32, &d_w256, &mut d_out)?;
+        // SAFETY: launch shape and buffers match the kernel signature.
+        unsafe {
+            module.fft_c2c_256_warp(stream.as_ref(), cfg, &d_in, &d_w32, &d_w256, &mut d_out)
+        }?;
         e.record(&stream)?;
         e.synchronize()?;
         samples.push(s.elapsed_ms(&e)? as f64 * 1.0e-3);

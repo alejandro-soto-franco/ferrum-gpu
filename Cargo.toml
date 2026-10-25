@@ -42,10 +42,10 @@ pyo3 = { version = "0.23", features = ["extension-module", "abi3-py310"] }
 numpy = "0.23"
 
 # cuda-oxide ecosystem (pinned to a specific main rev). Plan 2 integration.
-cuda-device = { git = "https://github.com/NVIDIA/cuda-rust", rev = "6ed9938e73a1e036dfab13f6e9a4585a170d03cf" }
-cuda-core   = { git = "https://github.com/NVIDIA/cuda-rust", rev = "6ed9938e73a1e036dfab13f6e9a4585a170d03cf" }
-cuda-host   = { git = "https://github.com/NVIDIA/cuda-rust", rev = "6ed9938e73a1e036dfab13f6e9a4585a170d03cf" }
-cuda-macros = { git = "https://github.com/NVIDIA/cuda-rust", rev = "6ed9938e73a1e036dfab13f6e9a4585a170d03cf" }
+cuda-device = { git = "https://github.com/NVIDIA/cuda-rust", rev = "9df9e7cef561e03a066230b3bb433b3d8285da81" }
+cuda-core   = { git = "https://github.com/NVIDIA/cuda-rust", rev = "9df9e7cef561e03a066230b3bb433b3d8285da81" }
+cuda-host   = { git = "https://github.com/NVIDIA/cuda-rust", rev = "9df9e7cef561e03a066230b3bb433b3d8285da81" }
+cuda-macros = { git = "https://github.com/NVIDIA/cuda-rust", rev = "9df9e7cef561e03a066230b3bb433b3d8285da81" }
 
 [workspace.lints.rust]
 missing_docs = "warn"

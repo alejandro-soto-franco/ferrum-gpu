@@ -14,7 +14,8 @@
 use std::f32::consts::PI;
 
 use anyhow::Result;
-use cuda_core::{DeviceBuffer, LaunchConfig};
+use cuda_core::DeviceBuffer;
+use cuda_core::simt::LaunchConfig;
 use ferrum_gpu_bench::{BATCH, alternating_bench, init_cuda_contexts};
 
 include!("../../../ferrum-gpu-fft-kernels/src/fft256_warp_body.rs");
@@ -56,7 +57,8 @@ fn main() -> Result<()> {
                   _tw: &DeviceBuffer<f32>,
                   dout: &mut DeviceBuffer<f32>|
      -> Result<()> {
-        module.fft_c2c_256_warp(stream.as_ref(), cfg, din, &d_w32, &d_w256, dout)?;
+        // SAFETY: launch shape and buffers match the kernel signature.
+        unsafe { module.fft_c2c_256_warp(stream.as_ref(), cfg, din, &d_w32, &d_w256, dout) }?;
         Ok(())
     };
 

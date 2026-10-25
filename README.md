@@ -49,7 +49,7 @@ The wheel does not bundle `libcuda`; users need the NVIDIA driver installed.
 - Linux x86_64
 - CUDA Toolkit 13.x
 - NVIDIA driver compatible with the installed Toolkit
-- Rust nightly `2026-04-03` (pinned via `rust-toolchain.toml`)
+- Rust 1.99.1 (pinned via `rust-toolchain.toml`)
 - `cargo-oxide`: `cargo install --git https://github.com/NVIDIA/cuda-rust cargo-oxide`
 - For the Python bindings: Python 3.10+ with `maturin` + `pytest` + `numpy`
 

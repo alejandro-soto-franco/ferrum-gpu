@@ -18,7 +18,8 @@
 use std::f32::consts::PI;
 
 use anyhow::{Result, anyhow};
-use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
+use cuda_core::{CudaContext, DeviceBuffer};
+use cuda_core::simt::LaunchConfig;
 use cudarc::cufft::{CudaFft, FftDirection, sys as cufft_sys};
 use cudarc::driver::CudaContext as CudarcContext;
 use ferrum_gpu_fft::Plan;
@@ -87,9 +88,12 @@ fn launch_inter(
     dout: &mut DeviceBuffer<f32>,
 ) -> Result<()> {
     match n {
-        256 => m.fft_c2c_256_r16s(s, cfg, din, tw, dout)?,
-        1024 => m.fft_c2c_1024(s, cfg, din, tw, dout)?,
-        4096 => m.fft_c2c_4096_4step_reg(s, cfg, din, tw, dout)?,
+        // SAFETY: launch shape and buffers match the kernel signature.
+        256 => unsafe { m.fft_c2c_256_r16s(s, cfg, din, tw, dout) }?,
+        // SAFETY: launch shape and buffers match the kernel signature.
+        1024 => unsafe { m.fft_c2c_1024(s, cfg, din, tw, dout) }?,
+        // SAFETY: launch shape and buffers match the kernel signature.
+        4096 => unsafe { m.fft_c2c_4096_4step_reg(s, cfg, din, tw, dout) }?,
         _ => return Err(anyhow!("unsupported N {n}")),
     }
     Ok(())
@@ -109,9 +113,12 @@ fn launch_split(
     oim: &mut DeviceBuffer<f32>,
 ) -> Result<()> {
     match n {
-        256 => m.fft_c2c_256_r16s_split(s, cfg, re, im, tw, ore, oim)?,
-        1024 => m.fft_c2c_1024_split(s, cfg, re, im, tw, ore, oim)?,
-        4096 => m.fft_c2c_4096_4step_reg_split(s, cfg, re, im, tw, ore, oim)?,
+        // SAFETY: launch shape and buffers match the kernel signature.
+        256 => unsafe { m.fft_c2c_256_r16s_split(s, cfg, re, im, tw, ore, oim) }?,
+        // SAFETY: launch shape and buffers match the kernel signature.
+        1024 => unsafe { m.fft_c2c_1024_split(s, cfg, re, im, tw, ore, oim) }?,
+        // SAFETY: launch shape and buffers match the kernel signature.
+        4096 => unsafe { m.fft_c2c_4096_4step_reg_split(s, cfg, re, im, tw, ore, oim) }?,
         _ => return Err(anyhow!("unsupported N {n}")),
     }
     Ok(())

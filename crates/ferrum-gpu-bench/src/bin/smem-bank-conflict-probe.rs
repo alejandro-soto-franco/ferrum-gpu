@@ -6,7 +6,8 @@
 use std::time::Instant;
 
 use anyhow::Result;
-use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
+use cuda_core::{CudaContext, DeviceBuffer};
+use cuda_core::simt::LaunchConfig;
 use cuda_device::{DisjointSlice, SharedArray, kernel, thread};
 use cuda_host::cuda_module;
 
@@ -96,12 +97,14 @@ fn main() -> Result<()> {
         shared_mem_bytes: 0,
     };
     let s_pad0 = time(|| {
-        module.stride_read_pad0(stream.as_ref(), cfg, &mut out_pad0)?;
+        // SAFETY: launch shape and buffers match the kernel signature.
+        unsafe { module.stride_read_pad0(stream.as_ref(), cfg, &mut out_pad0) }?;
         stream.synchronize()?;
         Ok(())
     })?;
     let s_pad1 = time(|| {
-        module.stride_read_pad1(stream.as_ref(), cfg, &mut out_pad1)?;
+        // SAFETY: launch shape and buffers match the kernel signature.
+        unsafe { module.stride_read_pad1(stream.as_ref(), cfg, &mut out_pad1) }?;
         stream.synchronize()?;
         Ok(())
     })?;

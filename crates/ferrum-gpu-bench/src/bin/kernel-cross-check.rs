@@ -11,7 +11,8 @@
 //! Exits 0 on pass, 1 on any mismatch.
 
 use anyhow::{Result, anyhow};
-use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
+use cuda_core::{CudaContext, DeviceBuffer};
+use cuda_core::simt::LaunchConfig;
 use ferrum_gpu_fft::{Complex32, Direction, KernelKind, Plan};
 
 include!("../../../ferrum-gpu-fft-kernels/src/kernels_body.rs");
@@ -84,7 +85,8 @@ fn check_specialised_4096(
         block_dim: (512, 1, 1),
         shared_mem_bytes: 0,
     };
-    module.fft_c2c_4096(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+    // SAFETY: launch shape and buffers match the kernel signature.
+    unsafe { module.fft_c2c_4096(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out) }?;
     let gpu = dbuf_out.to_host_vec(&stream)?;
 
     let (rel, idx) = max_rel_err(&gpu, &cpu);
@@ -131,7 +133,8 @@ fn check_specialised_1024(
         block_dim: (256, 1, 1),
         shared_mem_bytes: 0,
     };
-    module.fft_c2c_1024(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+    // SAFETY: launch shape and buffers match the kernel signature.
+    unsafe { module.fft_c2c_1024(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out) }?;
     let gpu = dbuf_out.to_host_vec(&stream)?;
 
     let (rel, idx) = max_rel_err(&gpu, &cpu);
@@ -168,7 +171,8 @@ fn check_specialised_256(
         block_dim: (64, 1, 1),
         shared_mem_bytes: 0,
     };
-    module.fft_c2c_256(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+    // SAFETY: launch shape and buffers match the kernel signature.
+    unsafe { module.fft_c2c_256(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out) }?;
     let gpu = dbuf_out.to_host_vec(&stream)?;
 
     let (rel, idx) = max_rel_err(&gpu, &cpu);

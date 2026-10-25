@@ -17,7 +17,8 @@
 //! itself does forward only and ignores `direction`.
 
 use anyhow::{Result, anyhow};
-use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
+use cuda_core::{CudaContext, DeviceBuffer};
+use cuda_core::simt::LaunchConfig;
 use ferrum_gpu_fft::{Complex32, Direction, KernelKind, Plan};
 
 include!("../../../crates/ferrum-gpu-fft-kernels/src/kernels_body.rs");
@@ -161,7 +162,10 @@ fn run_case(
                 block_dim: (512, 1, 1),
                 shared_mem_bytes: 0,
             };
-            module.fft_c2c_4096(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+            // SAFETY: launch shape and buffers match the kernel signature.
+            unsafe {
+                module.fft_c2c_4096(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)
+            }?;
         }
         KernelKind::Specialised1024 => {
             // One block per lane, 256 threads, 5 radix-4 Stockham stages.
@@ -170,7 +174,10 @@ fn run_case(
                 block_dim: (256, 1, 1),
                 shared_mem_bytes: 0,
             };
-            module.fft_c2c_1024(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+            // SAFETY: launch shape and buffers match the kernel signature.
+            unsafe {
+                module.fft_c2c_1024(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)
+            }?;
         }
         KernelKind::Specialised256 => {
             // One block per lane, 64 threads, 4 radix-4 Stockham stages.
@@ -179,7 +186,8 @@ fn run_case(
                 block_dim: (64, 1, 1),
                 shared_mem_bytes: 0,
             };
-            module.fft_c2c_256(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out)?;
+            // SAFETY: launch shape and buffers match the kernel signature.
+            unsafe { module.fft_c2c_256(stream.as_ref(), cfg, &dbuf_in, &dbuf_tw, &mut dbuf_out) }?;
         }
         _ => {
             // CUDA caps block_dim at 1024 threads per block; one thread per
@@ -190,14 +198,17 @@ fn run_case(
                 block_dim: (block_threads, 1, 1),
                 shared_mem_bytes: 0,
             };
-            module.fft_radix2_c2c_pow2_1d_fallback(
-                stream.as_ref(),
-                cfg,
-                &dbuf_in,
-                &dbuf_tw,
-                &mut dbuf_out,
-                case.log_n,
-            )?;
+            // SAFETY: launch shape and buffers match the kernel signature.
+            unsafe {
+                module.fft_radix2_c2c_pow2_1d_fallback(
+                    stream.as_ref(),
+                    cfg,
+                    &dbuf_in,
+                    &dbuf_tw,
+                    &mut dbuf_out,
+                    case.log_n,
+                )
+            }?;
         }
     }
 
