@@ -11,8 +11,8 @@
 use std::f32::consts::PI;
 
 use anyhow::{Result, anyhow};
-use cuda_core::{CudaContext, DeviceBuffer};
 use cuda_core::simt::LaunchConfig;
+use cuda_core::{CudaContext, DeviceBuffer};
 use ferrum_gpu_fft::Complex32;
 use ferrum_gpu_fft::warp_fft::warp_fft32_model;
 

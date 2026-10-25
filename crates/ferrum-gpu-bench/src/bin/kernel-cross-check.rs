@@ -11,8 +11,8 @@
 //! Exits 0 on pass, 1 on any mismatch.
 
 use anyhow::{Result, anyhow};
-use cuda_core::{CudaContext, DeviceBuffer};
 use cuda_core::simt::LaunchConfig;
+use cuda_core::{CudaContext, DeviceBuffer};
 use ferrum_gpu_fft::{Complex32, Direction, KernelKind, Plan};
 
 include!("../../../ferrum-gpu-fft-kernels/src/kernels_body.rs");

@@ -9,8 +9,8 @@
 use std::f32::consts::PI;
 
 use anyhow::{Result, anyhow};
-use cuda_core::{CudaContext, DeviceBuffer};
 use cuda_core::simt::LaunchConfig;
+use cuda_core::{CudaContext, DeviceBuffer};
 use cudarc::cufft::{CudaFft, FftDirection, sys as cufft_sys};
 use cudarc::driver::CudaContext as CudarcContext;
 use ferrum_gpu_fft::{Complex32, Direction, Plan};

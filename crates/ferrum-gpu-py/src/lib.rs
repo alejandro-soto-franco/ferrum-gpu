@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use cuda_core::embedded::{ArtifactPayloadKind, artifact_bundles_from_binary_path};
-use cuda_core::{CudaContext, DeviceBuffer};
 use cuda_core::simt::LaunchConfig;
+use cuda_core::{CudaContext, DeviceBuffer};
 
 use ferrum_gpu_fft::{KernelKind, Plan, R16S_MIN_BATCH, twiddles_full_roots};
 

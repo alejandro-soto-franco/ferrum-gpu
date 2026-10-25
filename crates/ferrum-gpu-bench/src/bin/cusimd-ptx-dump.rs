@@ -5,8 +5,8 @@
 //! `find /home/cargo-targets/ferrum-gpu -name 'cusimd_ptx_dump*.ptx' -exec cat {} \;`.
 
 use anyhow::Result;
-use cuda_core::{CudaContext, DeviceBuffer};
 use cuda_core::simt::LaunchConfig;
+use cuda_core::{CudaContext, DeviceBuffer};
 use cuda_device::cusimd::CuSimd;
 use cuda_device::{DisjointSlice, kernel, thread};
 use cuda_host::cuda_module;
