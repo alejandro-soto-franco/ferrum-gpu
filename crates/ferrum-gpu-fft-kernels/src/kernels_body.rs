@@ -908,6 +908,11 @@ mod kernels {
                 let (mut p11r,mut p11i)=g!(11); let (mut p12r,mut p12i)=g!(12);
                 let (mut p13r,mut p13i)=g!(13); let (mut p14r,mut p14i)=g!(14);
                 let (mut p15r,mut p15i)=g!(15);
+                // Lane `b` gathers column `b` and scatters row `b` of the same
+                // buffer. Volta and later schedule the lanes of a warp
+                // independently. Without this barrier one lane can overwrite an
+                // entry another lane has not yet read.
+                ::cuda_device::warp::sync_mask(0xFFFF);
                 let r=tw!(1,p1r,p1i); p1r=r.0; p1i=r.1;
                 let r=tw!(2,p2r,p2i); p2r=r.0; p2i=r.1;
                 let r=tw!(3,p3r,p3i); p3r=r.0; p3i=r.1;
@@ -1055,6 +1060,11 @@ mod kernels {
                 let (mut p11r,mut p11i)=g!(11); let (mut p12r,mut p12i)=g!(12);
                 let (mut p13r,mut p13i)=g!(13); let (mut p14r,mut p14i)=g!(14);
                 let (mut p15r,mut p15i)=g!(15);
+                // Lane `b` gathers column `b` and scatters row `b` of the same
+                // buffer. Volta and later schedule the lanes of a warp
+                // independently. Without this barrier one lane can overwrite an
+                // entry another lane has not yet read.
+                ::cuda_device::warp::sync_mask(0xFFFF);
                 let r=tw!(1,p1r,p1i); p1r=r.0; p1i=r.1;
                 let r=tw!(2,p2r,p2i); p2r=r.0; p2i=r.1;
                 let r=tw!(3,p3r,p3i); p3r=r.0; p3i=r.1;
@@ -1244,9 +1254,8 @@ mod kernels {
                 // the in-place shared buffer: without it a warp that reaches
                 // the scatter first overwrites BUF entries another warp has
                 // not yet read, corrupting a scheduling-dependent subset of
-                // blocks at large batch. (The 256-point kernel is a single
-                // warp running in lockstep, so its gather always precedes its
-                // scatter and it needs no such barrier.)
+                // blocks at large batch. The 256-point kernels separate the
+                // same phases with a warp barrier.
                 thread::sync_threads();
                 s!(0,x0r,x0i); s!(1,x1r,x1i); s!(2,x2r,x2i); s!(3,x3r,x3i);
                 s!(4,x4r,x4i); s!(5,x5r,x5i); s!(6,x6r,x6i); s!(7,x7r,x7i);
